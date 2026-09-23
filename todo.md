@@ -13,7 +13,6 @@ Nothing in progress. Clean checkpoint.
 
 ## Next
 
-- [ ] **Typecheck gate for deploys** — `vite build` doesn't typecheck and Cloudflare Workers Builds only runs the build command, so type errors can ship. Two options: set the Workers Builds deploy command to `bun run check && bun run build`, or drop `--no-typecheck` bias and add a `postcheck` CI hook. Blocked on choosing one (ADR-worthy if it shapes the build pipeline).
 - [ ] **Unit tests for crypto/cookie core** — `vitest` over `src/lib/encryption.ts` (round-trip, tamper detection, key format), `validateEncryptionKey` class matrix, and `sanitizeZipPath` adversarial inputs (currently verified by hand-rolled scripts only).
 - [ ] **Production `__Host-` verification** — after first deploy: confirm `__Host-s3-key` / `__Host-s3-connections` set correctly over HTTPS, legacy cookies migrate on first write, and no dev fallback key leaks (`ENCRYPTION_KEY` unset in prod).
 
@@ -36,3 +35,4 @@ Nothing in progress. Clean checkpoint.
 - [x] Phase 6 — `__Host-` cookie prefixes with read-old/write-new migration (`fcb6eb3`)
 - [x] Agentic workflow scaffolding: `todo.md`, `issue.md`, `docs/adr/`
 - [x] Deploy failure: `wrangler types --check` fails in CI because `.svelte-kit/cloudflare/_worker.js` (the entrypoint the hash covers) doesn't exist in a fresh clone — removed `types --check` from `build`/`check` (wrangler stays pinned at `4.136.3`) (see ISSUE-003).
+- [x] Typecheck gate for deploys — `build` now runs `bun run check && vite build`, so svelte-check failures block Cloudflare deploys (`e6ff4b8`).
