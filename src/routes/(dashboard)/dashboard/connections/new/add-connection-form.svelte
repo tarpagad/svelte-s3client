@@ -20,12 +20,22 @@
 
 	const submitHandler = () => {
 		loading = true;
-		return async ({ result, update }: { result: any; update: () => Promise<void> }) => {
+		return async ({
+			result,
+			update,
+		}: {
+			result: any;
+			update: () => Promise<void>;
+		}) => {
 			loading = false;
 			if (result.type === "failure") {
-				toast.error(result.data?.error ?? "Something went wrong. Please try again.");
+				toast.error(
+					result.data?.error ?? "Something went wrong. Please try again.",
+				);
 			} else if (result.type === "success") {
-				toast.success(type === "s3" ? "S3 connection added" : "R2 connection added");
+				toast.success(
+					type === "s3" ? "S3 connection added" : "R2 connection added",
+				);
 			}
 			await update();
 		};
@@ -35,12 +45,14 @@
 <Card class="w-full shadow-lg border-muted/40">
 	<CardHeader class="space-y-1">
 		<div class="flex items-center gap-2 mb-2">
-			<div class="p-2 bg-primary/10 rounded-full text-primary"><ShieldCheck size={24} /></div>
+			<div class="p-2 bg-primary/10 rounded-full text-primary">
+				<ShieldCheck size={24} />
+			</div>
 			<CardTitle class="text-2xl">New Connection</CardTitle>
 		</div>
 		<CardDescription>
-			Choose the provider type and enter your credentials. They will be encrypted and stored in
-			a secure, HTTP-only cookie.
+			Choose the provider type and enter your credentials. They will be
+			encrypted and stored in a secure, HTTP-only cookie.
 		</CardDescription>
 	</CardHeader>
 	<form method="POST" action="?/add" use:enhance={submitHandler}>
@@ -53,15 +65,17 @@
 						onclick={() => (type = "s3")}
 						class={cn(
 							"flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all",
-							type === "s3" ? "border-orange-500 bg-orange-500/5" : "border-border/40 hover:border-border"
-						)}
-					>
+							type === "s3"
+								? "border-orange-500 bg-orange-500/5"
+								: "border-border/40 hover:border-border",
+						)}>
 						<div
 							class={cn(
 								"p-3 rounded-lg transition-colors",
-								type === "s3" ? "bg-orange-500 text-white" : "bg-muted text-muted-foreground"
-							)}
-						>
+								type === "s3"
+									? "bg-orange-500 text-white"
+									: "bg-muted text-muted-foreground",
+							)}>
 							<HardDrive size={24} />
 						</div>
 						<span class="font-medium text-sm">Amazon S3</span>
@@ -71,15 +85,17 @@
 						onclick={() => (type = "r2")}
 						class={cn(
 							"flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all",
-							type === "r2" ? "border-blue-500 bg-blue-500/5" : "border-border/40 hover:border-border"
-						)}
-					>
+							type === "r2"
+								? "border-blue-500 bg-blue-500/5"
+								: "border-border/40 hover:border-border",
+						)}>
 						<div
 							class={cn(
 								"p-3 rounded-lg transition-colors",
-								type === "r2" ? "bg-blue-500 text-white" : "bg-muted text-muted-foreground"
-							)}
-						>
+								type === "r2"
+									? "bg-blue-500 text-white"
+									: "bg-muted text-muted-foreground",
+							)}>
 							<Globe size={24} />
 						</div>
 						<span class="font-medium text-sm">Cloudflare R2</span>
@@ -89,32 +105,58 @@
 			</div>
 			<div class="space-y-2">
 				<Label for="name">Connection Name</Label>
-				<Input id="name" name="name" placeholder={type === "s3" ? "e.g. Production S3" : "e.g. Media R2"} required />
+				<Input
+					id="name"
+					name="name"
+					placeholder={type === "s3" ? "e.g. Production S3" : "e.g. Media R2"}
+					required />
 			</div>
 			<div class="space-y-2">
 				<Label for="accessKeyId">Access Key ID</Label>
-				<Input id="accessKeyId" name="accessKeyId" placeholder={type === "s3" ? "AKIA..." : "R2 Access Key"} required autocomplete="off" />
+				<Input
+					id="accessKeyId"
+					name="accessKeyId"
+					placeholder={type === "s3" ? "AKIA..." : "R2 Access Key"}
+					required
+					autocomplete="off" />
 			</div>
 			<div class="space-y-2">
 				<Label for="secretAccessKey">Secret Access Key</Label>
-				<Input id="secretAccessKey" name="secretAccessKey" type="password" placeholder="wJalrXUt...EXAMPLEKEY" required autocomplete="off" />
+				<Input
+					id="secretAccessKey"
+					name="secretAccessKey"
+					type="password"
+					placeholder="wJalrXUt...EXAMPLEKEY"
+					required
+					autocomplete="off" />
 			</div>
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 				<div class="space-y-2">
 					<Label for="region">Region</Label>
-					<Input id="region" name="region" placeholder="us-east-1" defaultValue="us-east-1" />
+					<Input
+						id="region"
+						name="region"
+						placeholder="us-east-1"
+						defaultValue="" />
 				</div>
 				<div class="space-y-2">
 					<Label for="bucket">Bucket (optional)</Label>
-					<Input id="bucket" name="bucket" placeholder="Leave blank to browse all" />
+					<Input
+						id="bucket"
+						name="bucket"
+						placeholder="Leave blank to browse all" />
 				</div>
 			</div>
 			{#if type === "r2"}
 				<div class="space-y-2">
 					<Label for="endpoint">R2 Endpoint</Label>
-					<Input id="endpoint" name="endpoint" placeholder="https://<accountid>.r2.cloudflarestorage.com" />
+					<Input
+						id="endpoint"
+						name="endpoint"
+						placeholder="https://<accountid>.r2.cloudflarestorage.com" />
 					<p class="text-xs text-muted-foreground">
-						Your R2 endpoint URL from the Cloudflare dashboard. Required for R2 connections.
+						Your R2 endpoint URL from the Cloudflare dashboard. Required for R2
+						connections.
 					</p>
 				</div>
 			{/if}
@@ -123,11 +165,12 @@
 				<Input
 					id="publicUrl"
 					name="publicUrl"
-					placeholder={type === "r2" ? "https://pub-<bucketid>.r2.dev" : "https://my-bucket.example.com"}
-				/>
+					placeholder={type === "r2"
+						? "https://pub-<bucketid>.r2.dev"
+						: "https://my-bucket.example.com"} />
 				<p class="text-xs text-muted-foreground">
-					Base URL for public object links. If set, this will be used instead of the default S3
-					domain.
+					Base URL for public object links. If set, this will be used instead of
+					the default S3 domain.
 				</p>
 			</div>
 			{#if form?.error}

@@ -13,7 +13,7 @@ export const actions = {
 			type: form.get("type") === "r2" ? ("r2" as const) : ("s3" as const),
 			accessKeyId: String(form.get("accessKeyId") ?? ""),
 			secretAccessKey: String(form.get("secretAccessKey") ?? ""),
-			region: String(form.get("region") ?? "") || "us-east-1",
+			region: String(form.get("region") ?? "") || "",
 			endpoint: String(form.get("endpoint") ?? "") || undefined,
 			bucket: String(form.get("bucket") ?? "") || undefined,
 			publicUrl: String(form.get("publicUrl") ?? "") || undefined,
