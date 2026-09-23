@@ -22,16 +22,20 @@
 	} = $props();
 
 	let itemCount = $state<number | null>(null);
+	let itemCapReached = $state(false);
 	let isDeleting = $state(false);
 
 	$effect(() => {
 		let cancelled = false;
-		callS3<{ count: number }>("countObjectsToDelete", {
+		callS3<{ count: number; capped?: boolean }>("countObjectsToDelete", {
 			connectionId,
 			bucket: bucketName,
 			keys,
 		}).then((result) => {
-			if (!cancelled) itemCount = result.count;
+			if (!cancelled) {
+				itemCount = result.count;
+				itemCapReached = result.capped === true;
+			}
 		});
 		return () => {
 			cancelled = true;
@@ -96,9 +100,18 @@
 					</p>
 				{:else}
 					<p class="font-medium text-destructive">
-						{itemCount} item{itemCount === 1 ? "" : "s"} will be deleted
+						{itemCount}{itemCapReached ? "+" : ""} item{itemCount === 1
+							? ""
+							: "s"} will be deleted
 					</p>
-					<p class="text-muted-foreground">This action is permanent.</p>
+					{#if itemCapReached}
+						<p class="text-muted-foreground">
+							Count capped — large folders may contain more. This action is
+							permanent.
+						</p>
+					{:else}
+						<p class="text-muted-foreground">This action is permanent.</p>
+					{/if}
 				{/if}
 			</div>
 

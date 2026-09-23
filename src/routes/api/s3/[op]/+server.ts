@@ -152,12 +152,13 @@ export const POST: RequestHandler = async (event) => {
 				return json({ error: "Unknown operation" }, { status: 404 });
 		}
 	} catch (error: unknown) {
-		return json(
-			{
-				error:
-					error instanceof Error ? error.message : "Request failed",
-			},
-			{ status: 500 },
-		);
+		console.error(`S3 op "${op}" failed:`, error);
+		// AppError messages are written for end users; anything else can
+		// carry SDK/internal detail (endpoint, bucket names, stack hints).
+		const message =
+			error instanceof s3.AppError
+				? error.message
+				: "The request could not be completed. Check the connection settings and try again.";
+		return json({ error: message }, { status: 500 });
 	}
 };

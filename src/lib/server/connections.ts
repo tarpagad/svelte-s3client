@@ -14,6 +14,9 @@ import {
 import {
 	CONNECTIONS_COOKIE_NAME as COOKIE_NAME,
 	KEY_COOKIE_NAME,
+	LEGACY_CONNECTIONS_COOKIE_NAME as LEGACY_COOKIE_NAME,
+	LEGACY_KEY_COOKIE_NAME,
+	readCookie,
 	secretCookieOptions,
 	type ServerContext,
 } from "./context";
@@ -60,7 +63,11 @@ export async function resolveWriteKey(
 	if (overrideKey) {
 		key = overrideKey;
 	} else {
-		const keyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+		const keyCookie = readCookie(
+			ctx.cookies,
+			KEY_COOKIE_NAME,
+			LEGACY_KEY_COOKIE_NAME,
+		);
 		key = keyCookie ?? generateEncryptionKey();
 	}
 
@@ -79,7 +86,11 @@ export async function resolveEncryptionKey(
 ): Promise<string> {
 	if (overrideKey) return overrideKey;
 
-	const keyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+	const keyCookie = readCookie(
+		ctx.cookies,
+		KEY_COOKIE_NAME,
+		LEGACY_KEY_COOKIE_NAME,
+	);
 	if (keyCookie) return keyCookie;
 
 	if (ctx.envKey) return ctx.envKey;
@@ -97,7 +108,11 @@ export async function readConnections(
 	ctx: ServerContext,
 	encryptionKey?: string,
 ): Promise<StoredConnection[]> {
-	const cookie = ctx.cookies.get(COOKIE_NAME);
+	const cookie = readCookie(
+		ctx.cookies,
+		COOKIE_NAME,
+		LEGACY_COOKIE_NAME,
+	);
 	if (!cookie) return [];
 
 	const key = await resolveEncryptionKey(ctx, encryptionKey);
@@ -125,7 +140,11 @@ export async function writeConnections(
 	}
 
 	const key = await resolveWriteKey(ctx);
-	const existingKeyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+	const existingKeyCookie = readCookie(
+		ctx.cookies,
+		KEY_COOKIE_NAME,
+		LEGACY_KEY_COOKIE_NAME,
+	);
 
 	if (key !== existingKeyCookie) {
 		// First write ever (or dev default): persist the resolved key so
@@ -162,6 +181,11 @@ export async function writeConnections(
 
 	const jsonStr = JSON.stringify(connections);
 	const encrypted = await encrypt(jsonStr, key);
+
+	// Migration: clear the legacy (unprefixed) cookies so the __Host- pair
+	// becomes the only copy. The new __Host- cookies were just set above.
+	ctx.cookies.delete(LEGACY_COOKIE_NAME, { path: "/" });
+	ctx.cookies.delete(LEGACY_KEY_COOKIE_NAME, { path: "/" });
 
 	ctx.cookies.set(COOKIE_NAME, encrypted, baseCookieOptions());
 }

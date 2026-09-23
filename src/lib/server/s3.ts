@@ -22,6 +22,34 @@ import type {
 	S3ObjectInfo,
 } from "$lib/types";
 
+/**
+ * Error whose message is intended for the client. Anything else is an
+ * SDK/internal error: logged server-side, replaced by a generic message
+ * in the response so endpoint/bucket/account details never leak.
+ */
+export class AppError extends Error { }
+
+function clientMessage(error: unknown, fallback: string): string {
+	return error instanceof AppError ? error.message : fallback;
+}
+
+// Bulk delete/count folder expansion cap: keeps the listing loop bounded
+// (subrequest budget) and the confirmation dialog meaningful.
+const MAX_BULK_DELETE_OBJECTS = 5000;
+
+/**
+ * Object ACLs are an AWS S3 concept; S3-compatible stores (R2, MinIO,
+ * B2, …) reject or ignore GetObjectAcl. Skipping the per-file ACL probe
+ * on custom endpoints saves one subrequest per listed file.
+ */
+async function aclSupported(
+	ctx: ServerContext,
+	connectionId: string,
+): Promise<boolean> {
+	const connection = await getDecryptedConnection(ctx, connectionId);
+	return !connection?.endpoint;
+}
+
 export async function getS3Client(
 	ctx: ServerContext,
 	connectionId: string,
@@ -29,7 +57,7 @@ export async function getS3Client(
 	const connection = await getDecryptedConnection(ctx, connectionId);
 
 	if (!connection) {
-		throw new Error("Connection not found");
+		throw new AppError("Connection not found");
 	}
 
 	const config: S3ClientConfig = {
@@ -58,7 +86,7 @@ export async function getS3ClientForRegion(
 	const connection = await getDecryptedConnection(ctx, connectionId);
 
 	if (!connection) {
-		throw new Error("Connection not found");
+		throw new AppError("Connection not found");
 	}
 
 	return new S3Client({
@@ -80,7 +108,7 @@ export async function getBucketRegion(
 	const connection = await getDecryptedConnection(ctx, connectionId);
 
 	if (!connection) {
-		throw new Error("Connection not found");
+		throw new AppError("Connection not found");
 	}
 
 	// Custom endpoint (R2, MinIO, etc.): region is not resolvable, and the
@@ -143,9 +171,8 @@ export async function listBuckets(
 		}));
 	} catch (error: unknown) {
 		console.error("Failed to list buckets:", error);
-		throw new Error(
-			error instanceof Error ? error.message : "Failed to list buckets",
-		);
+		if (error instanceof AppError) throw error;
+		throw new Error(clientMessage(error, "Failed to list buckets"));
 	}
 }
 
@@ -160,6 +187,7 @@ export async function listObjects(
 ): Promise<ListObjectsResponse> {
 	try {
 		const client = await getS3Client(ctx, connectionId);
+		const checkAcl = await aclSupported(ctx, connectionId);
 
 		let offset = 0;
 		if (continuationToken) {
@@ -270,7 +298,7 @@ export async function listObjects(
 
 		const itemsWithAcl = await Promise.all(
 			paginatedItems.map(async (item) => {
-				if (item.type !== "file") return item;
+				if (item.type !== "file" || !checkAcl) return item;
 
 				try {
 					const acl = await client.send(
@@ -279,7 +307,7 @@ export async function listObjects(
 					const isPublic = (acl.Grants || []).some(
 						(grant) =>
 							grant.Grantee?.URI ===
-								"http://acs.amazonaws.com/groups/global/AllUsers" &&
+							"http://acs.amazonaws.com/groups/global/AllUsers" &&
 							grant.Permission === "READ",
 					);
 					return { ...item, isPublic };
@@ -301,9 +329,8 @@ export async function listObjects(
 		};
 	} catch (error: unknown) {
 		console.error("Failed to list objects:", error);
-		throw new Error(
-			error instanceof Error ? error.message : "Failed to list objects",
-		);
+		if (error instanceof AppError) throw error;
+		throw new Error(clientMessage(error, "Failed to list objects"));
 	}
 }
 
@@ -337,6 +364,12 @@ export async function deleteObjects(
 						if (c.Key) expandedKeys.push(c.Key);
 					}
 
+					if (expandedKeys.length > MAX_BULK_DELETE_OBJECTS) {
+						throw new AppError(
+							`Folder contents exceed the ${MAX_BULK_DELETE_OBJECTS}-object limit for bulk deletion. Delete large folders in smaller batches.`,
+						);
+					}
+
 					continuationToken = response.NextContinuationToken;
 				} while (continuationToken);
 			} else {
@@ -362,10 +395,7 @@ export async function deleteObjects(
 		return { success: true, deleted: expandedKeys.length };
 	} catch (error: unknown) {
 		console.error("Bulk delete failed:", error);
-		return {
-			error:
-				error instanceof Error ? error.message : "Failed to delete objects",
-		};
+		return { error: clientMessage(error, "Failed to delete objects") };
 	}
 }
 
@@ -385,11 +415,8 @@ export async function deleteObject(
 		);
 		return { success: true };
 	} catch (error: unknown) {
-		console.error("Operation failed:", error);
-		return {
-			error:
-				error instanceof Error ? error.message : "An unknown error occurred",
-		};
+		console.error("Delete object failed:", error);
+		return { error: clientMessage(error, "Failed to delete object") };
 	}
 }
 
@@ -430,9 +457,7 @@ export async function renameObject(
 		return { success: true };
 	} catch (error: unknown) {
 		console.error("Failed to rename object:", error);
-		return {
-			error: error instanceof Error ? error.message : "Failed to rename object",
-		};
+		return { error: clientMessage(error, "Failed to rename object") };
 	}
 }
 
@@ -466,10 +491,7 @@ export async function getDownloadUrl(
 	} catch (error: unknown) {
 		console.error("Failed to generate presigned URL:", error);
 		return {
-			error:
-				error instanceof Error
-					? error.message
-					: "Failed to generate download URL",
+			error: clientMessage(error, "Failed to generate download URL"),
 		};
 	}
 }
@@ -503,9 +525,7 @@ export async function uploadFile(
 		return { success: true };
 	} catch (error: unknown) {
 		console.error("Failed to upload file:", error);
-		return {
-			error: error instanceof Error ? error.message : "Failed to upload file",
-		};
+		return { error: clientMessage(error, "Failed to upload file") };
 	}
 }
 
@@ -527,10 +547,7 @@ export async function makePublic(
 		return { success: true };
 	} catch (error: unknown) {
 		console.error("Failed to make object public:", error);
-		return {
-			error:
-				error instanceof Error ? error.message : "Failed to set public access",
-		};
+		return { error: clientMessage(error, "Failed to set public access") };
 	}
 }
 
@@ -557,10 +574,7 @@ export async function getFileContent(
 		return { content };
 	} catch (error: unknown) {
 		console.error("Failed to fetch file content:", error);
-		return {
-			error:
-				error instanceof Error ? error.message : "Failed to fetch file content",
-		};
+		return { error: clientMessage(error, "Failed to fetch file content") };
 	}
 }
 
@@ -577,6 +591,7 @@ export async function searchObjects(
 
 	try {
 		const client = await getS3Client(ctx, connectionId);
+		const checkAcl = await aclSupported(ctx, connectionId);
 		const allFolders: S3ObjectInfo[] = [];
 		const allFiles: {
 			Key: string;
@@ -640,17 +655,19 @@ export async function searchObjects(
 					const extension = name.split(".").pop();
 
 					let isPublic = false;
-					try {
-						const acl = await client.send(
-							new GetObjectAclCommand({ Bucket: bucket, Key: key }),
-						);
-						isPublic = (acl.Grants || []).some(
-							(grant) =>
-								grant.Grantee?.URI ===
+					if (checkAcl) {
+						try {
+							const acl = await client.send(
+								new GetObjectAclCommand({ Bucket: bucket, Key: key }),
+							);
+							isPublic = (acl.Grants || []).some(
+								(grant) =>
+									grant.Grantee?.URI ===
 									"http://acs.amazonaws.com/groups/global/AllUsers" &&
-								grant.Permission === "READ",
-						);
-					} catch {}
+									grant.Permission === "READ",
+							);
+						} catch { }
+					}
 
 					return {
 						key,
@@ -673,7 +690,8 @@ export async function searchObjects(
 		};
 	} catch (error: unknown) {
 		console.error("Search failed:", error);
-		throw new Error(error instanceof Error ? error.message : "Search failed");
+		if (error instanceof AppError) throw error;
+		throw new Error(clientMessage(error, "Search failed"));
 	}
 }
 
@@ -718,7 +736,7 @@ export async function countObjectsToDelete(
 	connectionId: string,
 	bucket: string,
 	keys: string[],
-): Promise<{ count: number }> {
+): Promise<{ count: number; capped?: boolean }> {
 	try {
 		const client = await getS3Client(ctx, connectionId);
 		let totalCount = 0;
@@ -738,6 +756,10 @@ export async function countObjectsToDelete(
 
 					for (const c of response.Contents || []) {
 						if (c.Key && c.Key !== key) totalCount++;
+					}
+
+					if (totalCount > MAX_BULK_DELETE_OBJECTS) {
+						return { count: MAX_BULK_DELETE_OBJECTS, capped: true };
 					}
 
 					continuationToken = response.NextContinuationToken;
@@ -763,12 +785,12 @@ export async function createFolder(
 ) {
 	try {
 		if (!folderName.trim()) {
-			throw new Error("Folder name cannot be empty");
+			throw new AppError("Folder name cannot be empty");
 		}
 
 		const invalidChars = /[\\^`><{}[\]#%~|/]/;
 		if (invalidChars.test(folderName)) {
-			throw new Error(
+			throw new AppError(
 				"Folder name contains invalid characters (\\ ^ ` > < { } [ ] # % ~ | /)",
 			);
 		}
@@ -789,7 +811,7 @@ export async function createFolder(
 			(response.Contents && response.Contents.length > 0) ||
 			(response.CommonPrefixes && response.CommonPrefixes.length > 0)
 		) {
-			throw new Error("A folder or file with this name already exists");
+			throw new AppError("A folder or file with this name already exists");
 		}
 
 		await client.send(
@@ -803,8 +825,6 @@ export async function createFolder(
 		return { success: true };
 	} catch (error: unknown) {
 		console.error("Failed to create folder:", error);
-		return {
-			error: error instanceof Error ? error.message : "Failed to create folder",
-		};
+		return { error: clientMessage(error, "Failed to create folder") };
 	}
 }

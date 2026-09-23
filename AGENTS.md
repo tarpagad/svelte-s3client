@@ -124,10 +124,13 @@ strings; components parse with `new Date(...)`.
 
 | Control | Implementation |
 |---------|----------------|
-| Per-visitor key isolation | random 256-bit `s3-key` cookie, provisioned on first write (`resolveWriteKey`) |
+| Per-visitor key isolation | random 256-bit key cookie (`__Host-s3-key` in prod), provisioned on first write (`resolveWriteKey`) |
 | Clickjacking | CSP `frame-ancestors 'none'` + `X-Frame-Options: DENY` (`src/hooks.server.ts`) |
 | Presigned-URL leakage | `Referrer-Policy: strict-origin-when-cross-origin` |
 | MIME sniffing | `X-Content-Type-Options: nosniff` |
+| CSRF on JSON endpoints | `assertSameOrigin` — Origin/Referer host must match request host (`/api/*`) |
+| Subdomain cookie forgery | `__Host-` cookie prefixes in prod (plain names in dev: `__Host-` requires Secure) |
+| Error leakage | generic client-facing messages; SDK/internal detail logged server-side only (`AppError` = safe message) |
 
 ## Workers constraints (paid plan)
 

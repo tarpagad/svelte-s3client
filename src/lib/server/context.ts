@@ -1,10 +1,26 @@
 import { dev } from "$app/environment";
 import { json, type RequestEvent } from "@sveltejs/kit";
 
-/** Cookie storing the visitor's own encryption key (AES-256 secret). */
-export const KEY_COOKIE_NAME = "s3-key";
-/** Cookie storing the encrypted connection array. */
-export const CONNECTIONS_COOKIE_NAME = "s3-connections";
+/**
+ * Cookie storing the visitor's own encryption key (AES-256 secret) and the
+ * encrypted connection array. Production uses the __Host- prefix, which
+ * pins the cookie to this exact host (no Domain attribute, Secure
+ * required) so a sibling subdomain can never overwrite the credentials.
+ * Dev keeps the plain names: __Host- mandates the Secure attribute, which
+ * is incompatible with http://localhost in `vite dev`.
+ */
+export const KEY_COOKIE_NAME = dev ? "s3-key" : "__Host-s3-key";
+export const CONNECTIONS_COOKIE_NAME = dev
+	? "s3-connections"
+	: "__Host-s3-connections";
+/**
+ * Previous cookie names (no prefix). Cookies are READ under both names —
+ * `readCookie` tries the __Host- name first, then the legacy one — but
+ * always WRITTEN under the current primary name, so every visitor
+ * migrates to the prefixed cookies on their next write.
+ */
+export const LEGACY_KEY_COOKIE_NAME = "s3-key";
+export const LEGACY_CONNECTIONS_COOKIE_NAME = "s3-connections";
 
 /**
  * Options shared by all credential-bearing cookies (encryption key,
@@ -20,6 +36,17 @@ export function secretCookieOptions(maxAgeSeconds: number) {
 		path: "/",
 		maxAge: maxAgeSeconds,
 	};
+}
+
+/**
+ * Reads a credential cookie: __Host- name first, legacy name fallback.
+ */
+export function readCookie(
+	cookies: RequestEvent["cookies"],
+	primary: string,
+	legacy: string,
+): string | undefined {
+	return cookies.get(primary) ?? cookies.get(legacy);
 }
 
 export interface ServerContext {

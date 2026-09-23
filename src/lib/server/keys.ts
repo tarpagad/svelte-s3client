@@ -4,6 +4,9 @@ import { validateEncryptionKey } from "$lib/utils";
 import {
 	CONNECTIONS_COOKIE_NAME,
 	KEY_COOKIE_NAME,
+	LEGACY_CONNECTIONS_COOKIE_NAME,
+	LEGACY_KEY_COOKIE_NAME,
+	readCookie,
 	secretCookieOptions,
 	type ServerContext,
 } from "./context";
@@ -22,7 +25,11 @@ export async function setEncryptionKey(
 	const keyError = validateEncryptionKey(key);
 	if (keyError) return { error: keyError };
 
-	const connectionsCookie = ctx.cookies.get(CONNECTIONS_COOKIE_NAME);
+	const connectionsCookie = readCookie(
+		ctx.cookies,
+		CONNECTIONS_COOKIE_NAME,
+		LEGACY_CONNECTIONS_COOKIE_NAME,
+	);
 
 	if (!connectionsCookie) {
 		// No stored data — the key cookie is safe to set directly.
@@ -40,7 +47,11 @@ export async function getEncryptionKeyStatus(ctx: ServerContext): Promise<{
 	hasCookieKey: boolean;
 	hasEnvKey: boolean;
 }> {
-	const keyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+	const keyCookie = readCookie(
+		ctx.cookies,
+		KEY_COOKIE_NAME,
+		LEGACY_KEY_COOKIE_NAME,
+	);
 	return {
 		hasCookieKey: !!keyCookie,
 		hasEnvKey: !!ctx.envKey,
@@ -56,7 +67,11 @@ export async function getEncryptionKeyStatus(ctx: ServerContext): Promise<{
 export async function removeEncryptionKey(
 	ctx: ServerContext,
 ): Promise<{ success?: boolean; error?: string }> {
-	const keyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+	const keyCookie = readCookie(
+		ctx.cookies,
+		KEY_COOKIE_NAME,
+		LEGACY_KEY_COOKIE_NAME,
+	);
 	const existing = await readConnections(ctx);
 	const hasConnections = existing.length > 0;
 
@@ -74,6 +89,7 @@ export async function removeEncryptionKey(
 	}
 
 	ctx.cookies.delete(KEY_COOKIE_NAME, { path: "/" });
+	ctx.cookies.delete(LEGACY_KEY_COOKIE_NAME, { path: "/" });
 	return { success: true };
 }
 
@@ -85,7 +101,11 @@ export async function changeEncryptionKey(
 	const keyError = validateEncryptionKey(newKey);
 	if (keyError) return { error: keyError };
 
-	const connectionsCookie = ctx.cookies.get(CONNECTIONS_COOKIE_NAME);
+	const connectionsCookie = readCookie(
+		ctx.cookies,
+		CONNECTIONS_COOKIE_NAME,
+		LEGACY_CONNECTIONS_COOKIE_NAME,
+	);
 
 	if (!connectionsCookie) {
 		ctx.cookies.set(KEY_COOKIE_NAME, newKey, keyCookieOptions());
