@@ -3,6 +3,16 @@
 Stateless S3/R2 browser for Cloudflare Workers (paid). No auth, no database —
 credentials are AES-256-GCM encrypted and stored in HTTP-only cookies.
 
+## Agent workflow docs
+
+| File | Purpose |
+|------|---------|
+| `todo.md` | Working backlog (Now / Next / Later / Done, with commit hashes) |
+| `issue.md` | Open bugs & risks (ISSUE-NNN), with resolved history |
+| `docs/adr/` | Architecture Decision Records — read before changing architecture; write one before reversing a decision (index in `docs/adr/README.md`) |
+
+Keep `todo.md`/`issue.md` updated in the same commit as the work they describe.
+
 ## Stack
 
 SvelteKit 2 (Svelte 5 runes) · TypeScript · Tailwind CSS 4 · Bun · AWS S3 SDK +
