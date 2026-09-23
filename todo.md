@@ -13,7 +13,7 @@ Nothing in progress. Clean checkpoint.
 
 ## Next
 
-- [ ] **Production `__Host-` verification** — after first deploy: confirm `__Host-s3-key` / `__Host-s3-connections` set correctly over HTTPS, legacy cookies migrate on first write, and no dev fallback key leaks (`ENCRYPTION_KEY` unset in prod).
+Nothing in progress. Clean checkpoint.
 
 ## Later
 
@@ -36,3 +36,4 @@ Nothing in progress. Clean checkpoint.
 - [x] Deploy failure: `wrangler types --check` fails in CI because `.svelte-kit/cloudflare/_worker.js` (the entrypoint the hash covers) doesn't exist in a fresh clone — removed `types --check` from `build`/`check` (wrangler stays pinned at `4.136.3`) (see ISSUE-003).
 - [x] Typecheck gate for deploys — `build` now runs `bun run check && vite build`, so svelte-check failures block Cloudflare deploys (`cdec3db`).
 - [x] Unit tests for crypto/cookie core — `vitest` (`bun run test`, 19 tests): `encryption.ts` round-trip/tamper/truncation, `validateEncryptionKey` class matrix, `sanitizeZipPath` adversarial inputs (extracted to `src/lib/zip-path.ts` so tests don't import the S3 SDK) (`b55d9ff`).
+- [x] Production `__Host-` verification against the production deployment (URL omitted from the public repo) — 10-point matrix: headers, no env-key leak, `__Host-s3-key`/`__Host-s3-connections` attributes over HTTPS, legacy-jar migration on first write (legacy names cleared), dashboard decrypt round-trip, Origin 403, remove-key guard refusal.
