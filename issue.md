@@ -28,6 +28,21 @@ many listing subrequests before the cap trips. The bulk-delete paths are
 bounded (`MAX_BULK_DELETE_OBJECTS`); this one is only bounded by the 800-file
 result cap. Candidate fix: stop expanding once `items.length >= 800`.
 
+### ISSUE-003 — `wrangler types --check` cannot run in CI (entrypoint absent in fresh clone)
+- Severity: medium
+- Status: fixed
+- Area: `package.json` (build/check scripts), `worker-configuration.d.ts`
+
+`wrangler types --check` hashes the Env types including `GlobalProps.mainModule`,
+which wrangler only emits when the `main` entrypoint file exists. That file is
+`.svelte-kit/cloudflare/_worker.js`, produced by `vite build` — so in a fresh
+clone (Cloudflare Workers Builds) the check ran before the file existed, produced
+a different hash, and failed every deploy. Local runs always passed because
+`.svelte-kit/` existed. Fix: removed `wrangler types --check` from `build` and
+`check`; types regen stays manual (`bun run gen`) after `wrangler.jsonc` changes.
+Unresolved follow-up: if someone wants the check restored, it must run *after*
+`vite build` (e.g. a post-build step), not before.
+
 ### ISSUE-002 — `user_prefs` cookie is not integrity-protected
 - Severity: low
 - Status: open
