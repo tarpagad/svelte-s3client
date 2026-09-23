@@ -1,12 +1,15 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import * as s3 from "$lib/server/s3";
-import { getServerContext } from "$lib/server/context";
+import { assertSameOrigin, getServerContext } from "$lib/server/context";
 
 // Cloudflare enforces a 100 MB request body limit at the edge.
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 export const POST: RequestHandler = async (event) => {
+	const blocked = assertSameOrigin(event);
+	if (blocked) return blocked;
+
 	const ctx = getServerContext(event);
 
 	let form: FormData;

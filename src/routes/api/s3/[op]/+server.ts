@@ -1,7 +1,7 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import * as s3 from "$lib/server/s3";
-import { getServerContext } from "$lib/server/context";
+import { assertSameOrigin, getServerContext } from "$lib/server/context";
 
 type Payload = Record<string, unknown>;
 
@@ -22,6 +22,9 @@ function arr(body: Payload, key: string): string[] {
 }
 
 export const POST: RequestHandler = async (event) => {
+	const blocked = assertSameOrigin(event);
+	if (blocked) return blocked;
+
 	const op = event.params.op ?? "";
 	const ctx = getServerContext(event);
 
@@ -46,10 +49,10 @@ export const POST: RequestHandler = async (event) => {
 						num(body, "maxKeys", 100),
 						str(body, "continuationToken") || undefined,
 						(str(body, "sortBy") || "date-desc") as
-							| "date-desc"
-							| "date-asc"
-							| "name-asc"
-							| "name-desc",
+						| "date-desc"
+						| "date-asc"
+						| "name-asc"
+						| "name-desc",
 					),
 				);
 			case "searchObjects":

@@ -1,9 +1,12 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
-import { getServerContext } from "$lib/server/context";
+import { assertSameOrigin, getServerContext } from "$lib/server/context";
 import { getEncryptionKeyStatus, setEncryptionKey, removeEncryptionKey, changeEncryptionKey } from "$lib/server/keys";
 
 export const POST: RequestHandler = async (event) => {
+	const blocked = assertSameOrigin(event);
+	if (blocked) return blocked;
+
 	const op = event.params.op ?? "";
 	const ctx = getServerContext(event);
 

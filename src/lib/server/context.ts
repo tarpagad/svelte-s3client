@@ -1,5 +1,5 @@
 import { dev } from "$app/environment";
-import type { RequestEvent } from "@sveltejs/kit";
+import { json, type RequestEvent } from "@sveltejs/kit";
 
 /** Cookie storing the visitor's own encryption key (AES-256 secret). */
 export const KEY_COOKIE_NAME = "s3-key";
@@ -37,4 +37,40 @@ export interface ServerContext {
 export function getServerContext(event: RequestEvent): ServerContext {
 	const env = event.platform?.env as { ENCRYPTION_KEY?: string } | undefined;
 	return { cookies: event.cookies, envKey: env?.ENCRYPTION_KEY };
+}
+
+/**
+ * CSRF defence for the JSON endpoints. SvelteKit already CSRF-checks
+ * `content-type: application/json` POSTs (blocks text/plain form posts),
+ * but browsers can still be made to send same-site (subdomain) JSON with
+ * cookies attached. Defence in depth: an explicit Origin/Referer check
+ * that the request really came from this exact host.
+ *
+ * Returns a 403 JSON response if the request is not same-origin, or
+ * `null` when it passes. Cross-origin fetch() cannot set Origin, so a
+ * missing Origin+Referer is also rejected.
+ */
+export function assertSameOrigin(event: RequestEvent): Response | null {
+	const request = event.request;
+	const origin = request.headers.get("origin");
+	const referer = request.headers.get("referer");
+	// Referer falls back to the origin: "https://site.com/page" → "https://site.com"
+	const source = origin ?? referer?.split("/").slice(0, 3).join("/");
+
+	if (!source) {
+		return json({ error: "Missing Origin header" }, { status: 403 });
+	}
+
+	let sourceHost: string;
+	try {
+		sourceHost = new URL(source).host;
+	} catch {
+		return json({ error: "Invalid Origin header" }, { status: 403 });
+	}
+
+	if (sourceHost !== event.url.host) {
+		return json({ error: "Cross-origin request rejected" }, { status: 403 });
+	}
+
+	return null;
 }
