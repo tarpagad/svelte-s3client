@@ -1,0 +1,19 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "svelte-s3client",
+	"compatibility_date": "2026-09-23",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"nodejs_als"
+	],
+	"limits": {
+		"cpu_ms": 300000
+	},
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"workers_dev": true,
+	"preview_urls": true
+}
