@@ -20,6 +20,22 @@ interface DownloadItem {
 }
 
 /**
+ * Zip-slip defence for zip entry names. Selection prefixes come from the
+ * request, so a crafted folder prefix (e.g. "../") would otherwise produce
+ * entries that escape the extraction directory. Collapses backslashes,
+ * strips drive letters/leading slashes, drops "." and ".." segments, and
+ * removes empty segments. Returns the fallback name when nothing remains.
+ */
+function sanitizeZipPath(path: string, fallback = "download"): string {
+	const segments = path
+		.replace(/\\/g, "/")
+		.replace(/^([A-Za-z]:)?\/+/, "")
+		.split("/")
+		.filter((s) => s.length > 0 && s !== "." && s !== "..");
+	return segments.length > 0 ? segments.join("/") : fallback;
+}
+
+/**
  * Recursively expands folder prefixes ("prefix/") into a flat list of object
  * keys, mapping each object to the path it should have inside the zip. Files
  * are passed through unchanged and mapped to their base name.
@@ -37,7 +53,10 @@ async function expandKeys(
 		seen.add(key);
 
 		if (!key.endsWith("/")) {
-			items.push({ key, zipPath: key.split("/").pop() || "download" });
+			items.push({
+				key,
+				zipPath: sanitizeZipPath(key.split("/").pop() || "download"),
+			});
 			continue;
 		}
 
@@ -61,7 +80,10 @@ async function expandKeys(
 			// Folder markers ("prefix/") have no body — skip them.
 			for (const c of response.Contents || []) {
 				if (!c.Key || c.Key.endsWith("/")) continue;
-				items.push({ key: c.Key, zipPath: root + c.Key.slice(key.length) });
+				items.push({
+					key: c.Key,
+					zipPath: sanitizeZipPath(root + c.Key.slice(key.length)),
+				});
 			}
 
 			for (const p of response.CommonPrefixes || []) {
@@ -76,7 +98,7 @@ async function expandKeys(
 		for (const nestedPrefix of nestedPrefixes) {
 			const nested = await expandKeys(client, bucket, [nestedPrefix]);
 			for (const n of nested) {
-				items.push({ key: n.key, zipPath: root + n.zipPath });
+				items.push({ key: n.key, zipPath: sanitizeZipPath(root + n.zipPath) });
 			}
 		}
 	}
@@ -184,7 +206,11 @@ export const GET: RequestHandler = async (event) => {
 		keys.length === 1 && keys[0].endsWith("/")
 			? keys[0].slice(0, -1).split("/").pop() || "download"
 			: "download";
-	const filename = `${fallbackName}.zip`;
+	// Content-Disposition value: strip quotes/control chars to prevent
+	// header injection via a crafted folder prefix.
+	const safeName =
+		fallbackName.replace(/["\\\r\n\x00-\x1f]/g, "") || "download";
+	const filename = `${safeName}.zip`;
 
 	const body = new ReadableStream<Uint8Array>({
 		start(controller) {
