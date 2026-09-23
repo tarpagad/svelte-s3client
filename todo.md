@@ -13,7 +13,7 @@ Nothing in progress. Clean checkpoint.
 
 ## Next
 
-Nothing in progress. Clean checkpoint.
+- [ ] **Deploy ISSUE-004/ISSUE-005 fixes** — both are local-only; push to ship them, then re-run `./scripts/smoke.sh` against prod URL once green.
 
 ## Later
 
@@ -37,3 +37,4 @@ Nothing in progress. Clean checkpoint.
 - [x] Typecheck gate for deploys — `build` now runs `bun run check && vite build`, so svelte-check failures block Cloudflare deploys (`cdec3db`).
 - [x] Unit tests for crypto/cookie core — `vitest` (`bun run test`, 19 tests): `encryption.ts` round-trip/tamper/truncation, `validateEncryptionKey` class matrix, `sanitizeZipPath` adversarial inputs (extracted to `src/lib/zip-path.ts` so tests don't import the S3 SDK) (`b55d9ff`).
 - [x] Production `__Host-` verification against the production deployment (URL omitted from the public repo) — 10-point matrix: headers, no env-key leak, `__Host-s3-key`/`__Host-s3-connections` attributes over HTTPS, legacy-jar migration on first write (legacy names cleared), dashboard decrypt round-trip, Origin 403, remove-key guard refusal.
+- [x] Integration smoke suite — `scripts/smoke.sh` (40 assertions, exit-code driven): headers, Origin matrix, key lifecycle incl. weak-key rejection, form-action add with legacy-jar migration, dashboard decrypt round-trip, dispatcher error shapes, rotation, delete + remove-guard. Found and fixed ISSUE-004/ISSUE-005.

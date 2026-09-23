@@ -140,21 +140,28 @@ export async function writeConnections(
 	}
 
 	const key = await resolveWriteKey(ctx);
+	const primaryKeyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
 	const existingKeyCookie = readCookie(
 		ctx.cookies,
 		KEY_COOKIE_NAME,
 		LEGACY_KEY_COOKIE_NAME,
 	);
 
-	if (key !== existingKeyCookie) {
-		// First write ever (or dev default): persist the resolved key so
-		// future reads/writes in later requests use the same secret.
+	if (key !== existingKeyCookie || !primaryKeyCookie) {
+		// Persist the resolved key under the primary name. Two cases:
+		// - first write ever (or dev default): key differs from any cookie;
+		// - legacy-name visitor: key value came from the legacy cookie
+		//   (reused for data continuity) but the legacy cookies are cleared
+		//   below — re-persist the same value under the primary name, or the
+		//   key would be stranded and the data undecryptable.
 		ctx.cookies.set(
 			KEY_COOKIE_NAME,
 			key,
 			secretCookieOptions(KEY_COOKIE_MAX_AGE),
 		);
+	}
 
+	if (key !== existingKeyCookie) {
 		// Legacy migration: existing connections may come from an outer
 		// cookie encrypted under a shared secret (env key, or the dev
 		// default), which is the only way data can exist without a key

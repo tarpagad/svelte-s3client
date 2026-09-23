@@ -88,8 +88,18 @@ export async function removeEncryptionKey(
 		};
 	}
 
-	ctx.cookies.delete(KEY_COOKIE_NAME, { path: "/" });
+	// Deletion of a __Host- prefixed cookie must itself carry the Secure
+	// attribute (prefix rules apply to every Set-Cookie, including
+	// Max-Age=0), otherwise browsers reject it and the cookie survives.
+	ctx.cookies.delete(KEY_COOKIE_NAME, secretCookieOptions(0));
 	ctx.cookies.delete(LEGACY_KEY_COOKIE_NAME, { path: "/" });
+
+	// A stale connections cookie with no readable key behind it (e.g. left
+	// over from a wiped jar or a failed rotation) would keep resurfacing as
+	// undecryptable junk — clear it in the same pass. Unreadable data never
+	// blocks removal here: readConnections returned nothing for it.
+	ctx.cookies.delete(CONNECTIONS_COOKIE_NAME, secretCookieOptions(0));
+	ctx.cookies.delete(LEGACY_CONNECTIONS_COOKIE_NAME, { path: "/" });
 	return { success: true };
 }
 

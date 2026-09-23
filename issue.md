@@ -17,6 +17,37 @@ Rules:
 
 ## Open
 
+### ISSUE-004 — Legacy-cookie migration stranded the visitor key (data loss)
+- Severity: high
+- Status: fixed (smoke suite)
+- Area: `src/lib/server/connections.ts` (`writeConnections`)
+
+When a visitor carried a pre-`__Host-` legacy `s3-key` cookie, `resolveWriteKey`
+reused its **value** for data continuity — but `writeConnections` then
+unconditionally cleared the legacy cookies, and the "persist key under primary
+name" branch was gated on `key !== existingKeyCookie`, which was false. Result:
+the key existed under **no** cookie name → every future read threw → the data
+was permanently undecryptable. Surfaced by the new smoke suite; earlier manual
+prod verification was invalid because a malformed jar file never actually sent
+the legacy cookies (two printf lines concatenated into one). Fix: persist the
+key under the primary name whenever `!primaryKeyCookie` (value re-used from the
+legacy name) OR the key differs from any cookie (first write ever).
+
+### ISSUE-005 — `__Host-` cookie deletion rejected by browsers (no Secure attr)
+- Severity: high
+- Status: fixed (smoke suite)
+- Area: `src/lib/server/keys.ts` (`removeEncryptionKey`), plus stale-connections cleanup
+
+`cookies.delete(name, { path: "/" })` serializes `Set-Cookie: name=;
+Max-Age=0; ... SameSite=Lax` — **without `Secure`**. The `__Host-` prefix rules
+apply to *every* Set-Cookie including deletions, so browsers (and modern curl)
+reject these headers: key removal and legacy-cookie clearing silently never
+took effect. Second latent bug in the same handler: a stale
+`__Host-s3-connections` cookie with no readable key survived `keys/remove`,
+resurfacing as undecryptable junk on every request. Fix: delete the `__Host-`
+names with `secretCookieOptions(0)` (emits `Secure; SameSite=Strict` on the
+Max-Age=0 header), and clear both connections-cookie names in the same pass.
+
 ### ISSUE-001 — ZIP listing still expands up to 800 folders without a prefix budget
 - Severity: low
 - Status: open
@@ -28,8 +59,7 @@ many listing subrequests before the cap trips. The bulk-delete paths are
 bounded (`MAX_BULK_DELETE_OBJECTS`); this one is only bounded by the 800-file
 result cap. Candidate fix: stop expanding once `items.length >= 800`.
 
-### ISSUE-003 — `wrangler types --check` cannot run in CI (entrypoint absent in fresh clone)
-- Severity: medium
+### ISSUE-003 — `wrangler types --check` cannot run in CI (entrypoint absent in fresh clone)- Severity: medium
 - Status: fixed
 - Area: `package.json` (build/check scripts), `worker-configuration.d.ts`
 
