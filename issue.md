@@ -17,6 +17,24 @@ Rules:
 
 ## Open
 
+### ISSUE-006 — CSP blocked Vite 8's blob: SharedWorker (dev HMR reconnect dead)
+- Severity: medium (dev-only; no prod impact)
+- Status: fixed (live browser verification)
+- Area: `src/hooks.server.ts`, `src/lib/security-headers.ts` (extracted)
+
+The strict CSP (`script-src 'self' 'unsafe-inline'`, no `worker-src`) predates
+Vite 8.3's dev client, which runs its server-reconnect ping
+(`waitForSuccessfulPing`) in a **SharedWorker built from a `blob:` URL**.
+Worker scripts have no `worker-src` fallback target containing `blob:`
+(falls back to `script-src`), so the browser blocked the worker —
+asynchronously, so `new SharedWorker()` did not throw and Vite's ping promise
+never settled. Symptom: after a dev-server restart, a stuck tab could never
+reconnect, and any page interaction (e.g. browsing R2 buckets) silently did
+nothing. Trigger: `bun install` for the vitest work re-resolved `^8.0.16` →
+Vite 8.3.0 in `bun.lock`. Fix: emit `worker-src 'self' blob:` **only in dev**
+(`buildSecurityHeaders(dev)` extracted to a unit-tested module); prod CSP is
+unchanged and static `_headers` mirrors it, with the divergence documented.
+
 ### ISSUE-004 — Legacy-cookie migration stranded the visitor key (data loss)
 - Severity: high
 - Status: fixed (smoke suite)
