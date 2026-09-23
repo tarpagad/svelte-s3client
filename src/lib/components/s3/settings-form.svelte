@@ -11,7 +11,7 @@
 	import CardTitle from "$lib/components/ui/card-title.svelte";
 	import Input from "$lib/components/ui/input.svelte";
 	import Label from "$lib/components/ui/label.svelte";
-	import { cn } from "$lib/utils";
+	import { cn, validateEncryptionKey } from "$lib/utils";
 
 	let viewMode = $state<"list" | "grid">("list");
 	let itemsPerPage = $state(20);
@@ -27,7 +27,10 @@
 
 	async function fetchKeyStatus() {
 		try {
-			const status = await callKeyApi<{ hasCookieKey: boolean; hasEnvKey: boolean }>("status");
+			const status = await callKeyApi<{
+				hasCookieKey: boolean;
+				hasEnvKey: boolean;
+			}>("status");
 			hasCookieKey = status.hasCookieKey;
 			hasEnvKey = status.hasEnvKey;
 		} catch {
@@ -65,13 +68,17 @@
 	}
 
 	async function handleSetKey() {
-		if (!newKey || newKey.length < 8) {
-			toast.error("Encryption key must be at least 8 characters");
+		const keyError = validateEncryptionKey(newKey);
+		if (keyError) {
+			toast.error(keyError);
 			return;
 		}
 		isKeySaving = true;
 		try {
-			const result = await callKeyApi<{ success?: boolean; error?: string }>("set", { key: newKey });
+			const result = await callKeyApi<{ success?: boolean; error?: string }>(
+				"set",
+				{ key: newKey },
+			);
 			if (result.error) {
 				toast.error(result.error);
 			} else {
@@ -88,20 +95,27 @@
 	}
 
 	async function handleChangeKey() {
-		if (!currentKey) {
-			toast.error("Current encryption key is required");
+		// currentKey is optional: legacy data (env-key era, or auto-provisioned
+		// random keys) has no user-chosen key, and the server falls back to its
+		// read chain when it is empty.
+		if (!newKey) {
+			toast.error("New encryption key is required");
 			return;
 		}
-		if (!newKey || newKey.length < 8) {
-			toast.error("New encryption key must be at least 8 characters");
+		const keyError = validateEncryptionKey(newKey);
+		if (keyError) {
+			toast.error(keyError);
 			return;
 		}
 		isKeySaving = true;
 		try {
-			const result = await callKeyApi<{ success?: boolean; error?: string }>("change", {
-				currentKey,
-				newKey,
-			});
+			const result = await callKeyApi<{ success?: boolean; error?: string }>(
+				"change",
+				{
+					currentKey,
+					newKey,
+				},
+			);
 			if (result.error) {
 				toast.error(result.error);
 			} else {
@@ -121,13 +135,19 @@
 	async function handleRemoveKey() {
 		if (
 			!confirm(
-				"Are you sure? This will prevent access to any encrypted connections stored in your browser."
+				"Are you sure? This will prevent access to any encrypted connections stored in your browser.",
 			)
 		) {
 			return;
 		}
 		try {
-			await callKeyApi("remove");
+			const result = await callKeyApi<{ success?: boolean; error?: string }>(
+				"remove",
+			);
+			if (result.error) {
+				toast.error(result.error);
+				return;
+			}
 			toast.success("Encryption key removed");
 			fetchKeyStatus();
 		} catch {
@@ -140,7 +160,8 @@
 	<Card class="border-border/40 bg-card/30">
 		<CardHeader>
 			<CardTitle>Display Preferences</CardTitle>
-			<CardDescription>Choose how you want to view your S3 objects by default.</CardDescription>
+			<CardDescription
+				>Choose how you want to view your S3 objects by default.</CardDescription>
 		</CardHeader>
 		<CardContent class="space-y-6">
 			<div class="space-y-3">
@@ -153,17 +174,15 @@
 							"flex-1 flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all group",
 							viewMode === "list"
 								? "border-primary bg-primary/5"
-								: "border-border/40 hover:border-border hover:bg-muted/50"
-						)}
-					>
+								: "border-border/40 hover:border-border hover:bg-muted/50",
+						)}>
 						<div
 							class={cn(
 								"p-3 rounded-lg transition-colors",
 								viewMode === "list"
 									? "bg-primary text-primary-foreground"
-									: "bg-muted group-hover:bg-muted-foreground/10"
-							)}
-						>
+									: "bg-muted group-hover:bg-muted-foreground/10",
+							)}>
 							<List size={24} />
 						</div>
 						<span class="font-medium">List View</span>
@@ -176,17 +195,15 @@
 							"flex-1 flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all group",
 							viewMode === "grid"
 								? "border-primary bg-primary/5"
-								: "border-border/40 hover:border-border hover:bg-muted/50"
-						)}
-					>
+								: "border-border/40 hover:border-border hover:bg-muted/50",
+						)}>
 						<div
 							class={cn(
 								"p-3 rounded-lg transition-colors",
 								viewMode === "grid"
 									? "bg-primary text-primary-foreground"
-									: "bg-muted group-hover:bg-muted-foreground/10"
-							)}
-						>
+									: "bg-muted group-hover:bg-muted-foreground/10",
+							)}>
 							<Grid size={24} />
 						</div>
 						<span class="font-medium">Grid View</span>
@@ -199,8 +216,7 @@
 				<select
 					id="pageSize"
 					bind:value={itemsPerPage}
-					class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-				>
+					class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
 					<option value={10}>10 items</option>
 					<option value={20}>20 items</option>
 					<option value={50}>50 items</option>
@@ -216,19 +232,24 @@
 	<Card class="border-border/40 bg-card/30">
 		<CardHeader>
 			<div class="flex items-center gap-3">
-				<div class="p-2 bg-primary/10 rounded-lg text-primary"><Key size={20} /></div>
+				<div class="p-2 bg-primary/10 rounded-lg text-primary">
+					<Key size={20} />
+				</div>
 				<div>
 					<CardTitle>Encryption Key</CardTitle>
 					<CardDescription>
-						Your passphrase is used to encrypt credentials before they are stored in your
-						browser. Stored in an HTTP-only cookie — never accessible to JavaScript.
+						Your passphrase is used to encrypt credentials before they are
+						stored in your browser. Stored in an HTTP-only cookie — never
+						accessible to JavaScript.
 					</CardDescription>
 				</div>
 			</div>
 		</CardHeader>
 		<CardContent>
 			{#if hasCookieKey === null}
-				<p class="text-sm text-muted-foreground">Checking encryption status...</p>
+				<p class="text-sm text-muted-foreground">
+					Checking encryption status...
+				</p>
 			{:else if hasCookieKey}
 				<div class="space-y-4">
 					<div class="flex items-center gap-2 text-sm">
@@ -238,17 +259,29 @@
 						</span>
 					</div>
 					{#if showChangeKey}
-						<div class="space-y-3 border border-border/40 rounded-xl p-4 bg-muted/20">
+						<div
+							class="space-y-3 border border-border/40 rounded-xl p-4 bg-muted/20">
 							<div class="space-y-2">
 								<Label for="currentKey">Current Key</Label>
-								<Input id="currentKey" type="password" bind:value={currentKey} placeholder="Enter current encryption key" />
+								<Input
+									id="currentKey"
+									type="password"
+									bind:value={currentKey}
+									placeholder="Enter current encryption key" />
 							</div>
 							<div class="space-y-2">
 								<Label for="newKey">New Key</Label>
-								<Input id="newKey" type="password" bind:value={newKey} placeholder="Enter new encryption key (min. 8 characters)" />
+								<Input
+									id="newKey"
+									type="password"
+									bind:value={newKey}
+									placeholder="Enter new encryption key (min. 8 characters)" />
 							</div>
 							<div class="flex gap-2">
-								<Button onclick={handleChangeKey} disabled={isKeySaving} size="sm">
+								<Button
+									onclick={handleChangeKey}
+									disabled={isKeySaving}
+									size="sm">
 									{isKeySaving ? "Changing..." : "Change Key"}
 								</Button>
 								<Button
@@ -258,23 +291,24 @@
 										showChangeKey = false;
 										currentKey = "";
 										newKey = "";
-									}}
-								>
+									}}>
 									Cancel
 								</Button>
 							</div>
 						</div>
 					{:else}
 						<div class="flex gap-2">
-							<Button variant="outline" size="sm" onclick={() => (showChangeKey = true)}>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => (showChangeKey = true)}>
 								Change Key
 							</Button>
 							<Button
 								variant="outline"
 								size="sm"
 								class="text-destructive hover:bg-destructive/10 border-destructive/20"
-								onclick={handleRemoveKey}
-							>
+								onclick={handleRemoveKey}>
 								<Trash2 size={14} class="mr-1" />
 								Remove
 							</Button>
@@ -290,14 +324,22 @@
 						</span>
 					</div>
 					{#if !showKeyForm}
-						<Button variant="outline" size="sm" onclick={() => (showKeyForm = true)}>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => (showKeyForm = true)}>
 							Set Browser Key Instead
 						</Button>
 					{:else}
-						<div class="space-y-3 border border-border/40 rounded-xl p-4 bg-muted/20">
+						<div
+							class="space-y-3 border border-border/40 rounded-xl p-4 bg-muted/20">
 							<div class="space-y-2">
 								<Label for="setKey">Encryption Passphrase</Label>
-								<Input id="setKey" type="password" bind:value={newKey} placeholder="Min. 8 characters" />
+								<Input
+									id="setKey"
+									type="password"
+									bind:value={newKey}
+									placeholder="Min. 8 characters" />
 							</div>
 							<div class="flex gap-2">
 								<Button onclick={handleSetKey} disabled={isKeySaving} size="sm">
@@ -309,8 +351,7 @@
 									onclick={() => {
 										showKeyForm = false;
 										newKey = "";
-									}}
-								>
+									}}>
 									Cancel
 								</Button>
 							</div>
@@ -326,14 +367,19 @@
 						</span>
 					</div>
 					<p class="text-sm text-muted-foreground">
-						Set an encryption passphrase to secure your stored credentials. This is only needed
-						if no ENCRYPTION_KEY is configured on the server.
+						Set an encryption passphrase to secure your stored credentials. This
+						is only needed if no ENCRYPTION_KEY is configured on the server.
 					</p>
 					{#if showKeyForm}
-						<div class="space-y-3 border border-border/40 rounded-xl p-4 bg-muted/20">
+						<div
+							class="space-y-3 border border-border/40 rounded-xl p-4 bg-muted/20">
 							<div class="space-y-2">
 								<Label for="setKey">Encryption Passphrase</Label>
-								<Input id="setKey" type="password" bind:value={newKey} placeholder="Min. 8 characters" />
+								<Input
+									id="setKey"
+									type="password"
+									bind:value={newKey}
+									placeholder="Min. 8 characters" />
 							</div>
 							<div class="flex gap-2">
 								<Button onclick={handleSetKey} disabled={isKeySaving} size="sm">
@@ -345,14 +391,16 @@
 									onclick={() => {
 										showKeyForm = false;
 										newKey = "";
-									}}
-								>
+									}}>
 									Cancel
 								</Button>
 							</div>
 						</div>
 					{:else}
-						<Button variant="outline" size="sm" onclick={() => (showKeyForm = true)}>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => (showKeyForm = true)}>
 							Set Encryption Key
 						</Button>
 					{/if}
@@ -361,8 +409,9 @@
 		</CardContent>
 		<CardFooter class="border-t border-border/40 px-6 py-3">
 			<p class="text-[10px] text-muted-foreground">
-				The key is stored in an HTTP-only cookie. If you clear your cookies, stored connections
-				will become unrecoverable unless you remember this key.
+				The key is stored in an HTTP-only cookie. If you clear your cookies,
+				stored connections will become unrecoverable unless you remember this
+				key.
 			</p>
 		</CardFooter>
 	</Card>
