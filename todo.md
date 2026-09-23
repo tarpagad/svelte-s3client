@@ -13,7 +13,7 @@ Nothing in progress. Clean checkpoint.
 
 ## Next
 
-- [ ] **CI pipeline** — GitHub Actions: `bun install`, `bun run check`, `bun run build` on every push/PR. No tests exist yet, so CI is typecheck + build only until the test task below lands.
+- [ ] **Gate deploys on typecheck** — Cloudflare auto-deploy (Workers Builds) already runs the build on push, so GitHub Actions CI would be redundant. But `vite build` doesn't typecheck: set the Workers Builds command to `bun run check && bun run build` so type errors block deploys. (Revisit a real CI runner only if unit tests or collaborators land.)
 - [ ] **Unit tests for crypto/cookie core** — `vitest` over `src/lib/encryption.ts` (round-trip, tamper detection, key format), `validateEncryptionKey` class matrix, and `sanitizeZipPath` adversarial inputs (currently verified by hand-rolled scripts only).
 - [ ] **Production `__Host-` verification** — after first deploy: confirm `__Host-s3-key` / `__Host-s3-connections` set correctly over HTTPS, legacy cookies migrate on first write, and no dev fallback key leaks (`ENCRYPTION_KEY` unset in prod).
 
@@ -35,3 +35,4 @@ Nothing in progress. Clean checkpoint.
 - [x] Phase 5 — bounded folder expansion, ACL skip on custom endpoints, generic client errors (`fcb6eb3`)
 - [x] Phase 6 — `__Host-` cookie prefixes with read-old/write-new migration (`fcb6eb3`)
 - [x] Agentic workflow scaffolding: `todo.md`, `issue.md`, `docs/adr/`
+- [x] Deploy failure: stale `worker-configuration.d.ts` in Cloudflare build — pinned wrangler exact (`4.136.3`) so local & CI generate identical types (`wrangler types --check` in `build`/`check` validates on every run).
