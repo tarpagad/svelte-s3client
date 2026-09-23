@@ -1,6 +1,6 @@
 import type { Cookies } from "@sveltejs/kit";
 import { dev } from "$app/environment";
-import { decrypt, encrypt } from "$lib/encryption";
+import { decrypt, encrypt, generateEncryptionKey } from "$lib/encryption";
 import type {
 	ConnectionInfo,
 	CreateConnectionInput,
@@ -11,10 +11,12 @@ import {
 	createConnectionSchema,
 	updateConnectionSchema,
 } from "$lib/types";
-import type { ServerContext } from "./context";
-
-const COOKIE_NAME = "s3-connections";
-const KEY_COOKIE_NAME = "s3-key";
+import {
+	CONNECTIONS_COOKIE_NAME as COOKIE_NAME,
+	KEY_COOKIE_NAME,
+	secretCookieOptions,
+	type ServerContext,
+} from "./context";
 
 export interface StoredConnection {
 	id: string;
@@ -28,14 +30,49 @@ export interface StoredConnection {
 }
 
 function baseCookieOptions() {
-	return {
-		httpOnly: true,
-		secure: !dev,
-		sameSite: "strict" as const,
-		path: "/",
-	};
+	return secretCookieOptions(60 * 60 * 24 * 30);
 }
 
+const KEY_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10; // 10 years
+
+/**
+ * Resolves the key for a WRITE path (add/update connections, rotation).
+ * Guarantees ONE key per request so inner credential blobs and the outer
+ * cookie are always encrypted under the same secret:
+ *
+ * 1. explicit override (key rotation),
+ * 2. the visitor's key cookie,
+ * 3. a newly provisioned random per-visitor key (first write ever), or
+ *    the dev-only default in `vite dev`.
+ *
+ * The legacy env secret is never returned here — new data is never
+ * encrypted under a shared server secret. Memoized on the request-scoped
+ * ctx because mid-request cookie reads don't reflect mid-request
+ * `cookies.set` in SvelteKit.
+ */
+export async function resolveWriteKey(
+	ctx: ServerContext,
+	overrideKey?: string,
+): Promise<string> {
+	if (ctx.writeKeyCache) return ctx.writeKeyCache;
+
+	let key: string;
+	if (overrideKey) {
+		key = overrideKey;
+	} else {
+		const keyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+		key = keyCookie ?? generateEncryptionKey();
+	}
+
+	ctx.writeKeyCache = key;
+	return key;
+}
+
+/**
+ * Resolves the key for READ paths: visitor key → legacy shared env secret
+ * (read-only fallback for data created before per-visitor keys) → dev-only
+ * default → throw. Never use for writes — use `resolveWriteKey`.
+ */
 export async function resolveEncryptionKey(
 	ctx: ServerContext,
 	overrideKey?: string,
@@ -78,14 +115,55 @@ export async function writeConnections(
 	connections: StoredConnection[],
 	encryptionKey?: string,
 ): Promise<void> {
-	const key = await resolveEncryptionKey(ctx, encryptionKey);
+	// Explicit key (key rotation): use as-is, never touch the key cookie —
+	// the rotation flow sets it itself after the data is migrated.
+	if (encryptionKey) {
+		const jsonStr = JSON.stringify(connections);
+		const encrypted = await encrypt(jsonStr, encryptionKey);
+		ctx.cookies.set(COOKIE_NAME, encrypted, baseCookieOptions());
+		return;
+	}
+
+	const key = await resolveWriteKey(ctx);
+	const existingKeyCookie = ctx.cookies.get(KEY_COOKIE_NAME);
+
+	if (key !== existingKeyCookie) {
+		// First write ever (or dev default): persist the resolved key so
+		// future reads/writes in later requests use the same secret.
+		ctx.cookies.set(
+			KEY_COOKIE_NAME,
+			key,
+			secretCookieOptions(KEY_COOKIE_MAX_AGE),
+		);
+
+		// Legacy migration: existing connections may come from an outer
+		// cookie encrypted under a shared secret (env key, or the dev
+		// default), which is the only way data can exist without a key
+		// cookie. Re-encrypt their inner credential blobs under this
+		// visitor's key. Runs only on same-origin write paths, where
+		// SameSite=strict guarantees an existing key cookie would have
+		// been sent — so "absent" genuinely means "never provisioned".
+		const legacyKey = ctx.envKey ?? (dev ? "default-dev-key-do-not-use-in-prod" : undefined);
+		if (legacyKey && connections.length > 0) {
+			const migrated: StoredConnection[] = [];
+			for (const conn of connections) {
+				const inner = await decrypt(conn.encryptedCredentials, legacyKey);
+				migrated.push({
+					...conn,
+					encryptedCredentials:
+						inner !== null
+							? await encrypt(inner, key)
+							: conn.encryptedCredentials,
+				});
+			}
+			connections = migrated;
+		}
+	}
+
 	const jsonStr = JSON.stringify(connections);
 	const encrypted = await encrypt(jsonStr, key);
 
-	ctx.cookies.set(COOKIE_NAME, encrypted, {
-		...baseCookieOptions(),
-		maxAge: 60 * 60 * 24 * 30,
-	});
+	ctx.cookies.set(COOKIE_NAME, encrypted, baseCookieOptions());
 }
 
 function toConnectionInfo(c: StoredConnection): ConnectionInfo {
@@ -109,7 +187,9 @@ export async function addConnection(
 		return { error: result.error.issues[0].message };
 	}
 
-	const key = await resolveEncryptionKey(ctx);
+	// Write key: one key per request, shared by the inner blob and the
+	// outer cookie. Never the shared env secret.
+	const key = await resolveWriteKey(ctx);
 	const credsJson = JSON.stringify({
 		accessKeyId: result.data.accessKeyId,
 		secretAccessKey: result.data.secretAccessKey,
@@ -197,7 +277,8 @@ export async function updateConnection(
 	}
 
 	const existing = connections[index];
-	const key = await resolveEncryptionKey(ctx);
+	// Write key: one key per request — see addConnection.
+	const key = await resolveWriteKey(ctx);
 
 	const hasNewCredentials =
 		result.data.accessKeyId && result.data.secretAccessKey;

@@ -1,18 +1,15 @@
-import { dev } from "$app/environment";
 import { decrypt, encrypt } from "$lib/encryption";
-import type { ServerContext } from "./context";
+import {
+	KEY_COOKIE_NAME,
+	secretCookieOptions,
+	type ServerContext,
+} from "./context";
 import { readConnections, writeConnections } from "./connections";
 
-const KEY_COOKIE_NAME = "s3-key";
+const KEY_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10; // 10 years
 
 function keyCookieOptions() {
-	return {
-		httpOnly: true,
-		secure: !dev,
-		sameSite: "strict" as const,
-		maxAge: 60 * 60 * 24 * 365 * 10,
-		path: "/",
-	};
+	return secretCookieOptions(KEY_COOKIE_MAX_AGE);
 }
 
 export async function setEncryptionKey(

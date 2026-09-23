@@ -75,10 +75,19 @@ Browser                    Server
 ```
 
 - **No authentication** — anyone uses the tool with their own credentials.
-- **Encryption** — Web Crypto AES-256-GCM; key from `s3-key` cookie or
-  `ENCRYPTION_KEY` secret (`event.platform.env`); dev fallback only in `vite dev`.
+- **Encryption** — Web Crypto AES-256-GCM. Every visitor gets a **unique
+  random 256-bit key** (`s3-key` httpOnly cookie), auto-provisioned on the
+  first write (add/edit connection) — never a shared secret. `ENCRYPTION_KEY`
+  is **legacy/migration-only**: used to decrypt data created before
+  per-visitor keys, and re-encrypted under the visitor's key on next write.
+  Dev fallback key only in `vite dev`.
+- **Security headers** — `src/hooks.server.ts` sets CSP
+  (`frame-ancestors 'none'`), X-Frame-Options, nosniff, Referrer-Policy,
+  Permissions-Policy on every response.
 - **Server modules** — every exported function takes `ServerContext` first; no
-  ambient request state.
+  ambient request state. Key resolution is split read/write:
+  `resolveEncryptionKey` (read; env fallback allowed) vs `resolveWriteKey`
+  (write; provisions/memoizes the per-visitor key on the request ctx).
 - **Mutations** — client calls JSON endpoints then `invalidateAll()`;
   connection add/edit/delete are SvelteKit form actions with `use:enhance`.
 - **Preferences** — `user_prefs` written client-side (document.cookie), read
@@ -109,7 +118,16 @@ strings; components parse with `new Date(...)`.
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `ENCRYPTION_KEY` | No | Workers secret fallback for the encryption key (hashed via SHA-256) |
+| `ENCRYPTION_KEY` | No | **Legacy only** — decrypts connections created before per-visitor keys; migrated to the visitor's key on next write |
+
+## Security Model
+
+| Control | Implementation |
+|---------|----------------|
+| Per-visitor key isolation | random 256-bit `s3-key` cookie, provisioned on first write (`resolveWriteKey`) |
+| Clickjacking | CSP `frame-ancestors 'none'` + `X-Frame-Options: DENY` (`src/hooks.server.ts`) |
+| Presigned-URL leakage | `Referrer-Policy: strict-origin-when-cross-origin` |
+| MIME sniffing | `X-Content-Type-Options: nosniff` |
 
 ## Workers constraints (paid plan)
 

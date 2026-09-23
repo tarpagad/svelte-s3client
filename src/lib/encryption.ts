@@ -1,5 +1,20 @@
 export const ENCRYPTION_ALGORITHM = "AES-GCM";
 
+/**
+ * Generates a cryptographically random 256-bit key, base64url-encoded.
+ * Used to provision a unique per-visitor encryption key so no shared
+ * server secret can ever decrypt one user's stored credentials.
+ */
+export function generateEncryptionKey(): string {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	// base64url (RFC 4648 §5): URL/cookie safe, no padding
+	return btoa(String.fromCharCode(...bytes))
+		.replace(/\+/g, "-")
+		.replace(/\//g, "_")
+		.replace(/=+$/, "");
+}
+
 async function getCryptoKey(secret: string): Promise<CryptoKey> {
 	const encoder = new TextEncoder();
 	const keyData = encoder.encode(secret);
