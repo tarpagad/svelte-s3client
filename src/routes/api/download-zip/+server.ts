@@ -4,6 +4,7 @@ import {
 	type S3Client,
 } from "@aws-sdk/client-s3";
 import { Zip, ZipPassThrough } from "fflate";
+import { sanitizeZipPath } from "$lib/zip-path";
 import { getServerContext } from "$lib/server/context";
 import { getConnection } from "$lib/server/connections";
 import { getBucketRegion, getS3Client, getS3ClientForRegion } from "$lib/server/s3";
@@ -17,22 +18,6 @@ const MAX_TOTAL_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB guard
 interface DownloadItem {
 	key: string;
 	zipPath: string;
-}
-
-/**
- * Zip-slip defence for zip entry names. Selection prefixes come from the
- * request, so a crafted folder prefix (e.g. "../") would otherwise produce
- * entries that escape the extraction directory. Collapses backslashes,
- * strips drive letters/leading slashes, drops "." and ".." segments, and
- * removes empty segments. Returns the fallback name when nothing remains.
- */
-function sanitizeZipPath(path: string, fallback = "download"): string {
-	const segments = path
-		.replace(/\\/g, "/")
-		.replace(/^([A-Za-z]:)?\/+/, "")
-		.split("/")
-		.filter((s) => s.length > 0 && s !== "." && s !== "..");
-	return segments.length > 0 ? segments.join("/") : fallback;
 }
 
 /**
