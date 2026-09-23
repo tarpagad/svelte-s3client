@@ -34,5 +34,5 @@ Nothing in progress. Clean checkpoint.
 - [x] Phase 6 — `__Host-` cookie prefixes with read-old/write-new migration (`fcb6eb3`)
 - [x] Agentic workflow scaffolding: `todo.md`, `issue.md`, `docs/adr/`
 - [x] Deploy failure: `wrangler types --check` fails in CI because `.svelte-kit/cloudflare/_worker.js` (the entrypoint the hash covers) doesn't exist in a fresh clone — removed `types --check` from `build`/`check` (wrangler stays pinned at `4.136.3`) (see ISSUE-003).
-- [x] Typecheck gate for deploys — `build` now runs `bun run check && vite build`, so svelte-check failures block Cloudflare deploys (`e6ff4b8`).
-- [x] Unit tests for crypto/cookie core — `vitest` (`bun run test`, 19 tests): `encryption.ts` round-trip/tamper/truncation, `validateEncryptionKey` class matrix, `sanitizeZipPath` adversarial inputs (extracted to `src/lib/zip-path.ts` so tests don't import the S3 SDK) (`f820903`).
+- [x] Typecheck gate for deploys — `build` now runs `bun run check && vite build`, so svelte-check failures block Cloudflare deploys (`cdec3db`).
+- [x] Unit tests for crypto/cookie core — `vitest` (`bun run test`, 19 tests): `encryption.ts` round-trip/tamper/truncation, `validateEncryptionKey` class matrix, `sanitizeZipPath` adversarial inputs (extracted to `src/lib/zip-path.ts` so tests don't import the S3 SDK) (`b55d9ff`).
