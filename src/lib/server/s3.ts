@@ -18,6 +18,14 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getDecryptedConnection } from "./connections";
 import type { ServerContext } from "./context";
 import {
+	TRASH_MAX_AGE_DAYS,
+	TRASH_PREFIX,
+	isExpired,
+	parseStamp,
+	parseTrashKey,
+	trashDestKey,
+} from "$lib/trash-path";
+import {
 	destKeyForKey,
 	destKeyForPrefix,
 	isInsidePrefix,
@@ -245,7 +253,7 @@ export async function listObjects(
 			if (response.CommonPrefixes) {
 				for (const p of response.CommonPrefixes) {
 					const prefixStr = p.Prefix ?? "";
-					if (!allFolders.some((f) => f.key === prefixStr)) {
+					if (prefixStr !== TRASH_PREFIX && !allFolders.some((f) => f.key === prefixStr)) {
 						const name = prefixStr.slice(0, -1).split("/").pop() || "";
 						allFolders.push({
 							key: prefixStr,
@@ -260,7 +268,7 @@ export async function listObjects(
 				for (const c of response.Contents) {
 					if (c.Key === prefix) continue;
 					const key = c.Key || "";
-					if (key.endsWith("/") && key !== prefix) {
+					if (key.endsWith("/") && key !== prefix && key !== TRASH_PREFIX) {
 						const name = key.slice(0, -1).split("/").pop() || "";
 						if (!allFolders.some((f) => f.key === key)) {
 							allFolders.push({ key, name, type: "folder" as const });
@@ -628,6 +636,216 @@ async function expandMoveKeys(
 	return keys;
 }
 
+/**
+ * Soft-delete: copy each object under .s3client-trash/<stamp>/<key>
+ * then batch-delete the sources. One stamp per request keeps a batch
+ * grouped; the response returns the trash keys so the client can undo.
+ */
+export async function trashObjects(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	payload: { keys: string[]; offset?: number },
+) {
+	try {
+		const client = await getS3Client(ctx, connectionId);
+
+		const all = new Set<string>();
+		for (const key of payload.keys) {
+			if (key.endsWith("/")) {
+				for (const k of await expandMoveKeys(client, bucket, key)) all.add(k);
+			} else {
+				all.add(key);
+			}
+		}
+		const flat = [...all];
+		const offset = Math.max(0, Math.floor(payload.offset ?? 0));
+		const slice = flat.slice(offset, offset + MAX_MOVE_OBJECTS);
+
+		const now = new Date();
+		const trashed: string[] = [];
+		for (let i = 0; i < slice.length; i += 50) {
+			const chunk = slice.slice(i, i + 50);
+			await Promise.all(
+				chunk.map(async (key) => {
+					const dest = trashDestKey(key, now);
+					await client.send(
+						new CopyObjectCommand({
+							Bucket: bucket,
+							CopySource: encodeURIComponent(`${bucket}/${key}`),
+							Key: dest,
+						}),
+					);
+					trashed.push(dest);
+				}),
+			);
+		}
+
+		if (slice.length > 0) {
+			const objects = slice.map((key) => ({ Key: key }));
+			for (let i = 0; i < objects.length; i += 1000) {
+				await client.send(
+					new DeleteObjectsCommand({
+						Bucket: bucket,
+						Delete: { Objects: objects.slice(i, i + 1000) },
+					}),
+				);
+			}
+		}
+
+		const nextOffset = offset + slice.length;
+		return {
+			success: true,
+			processed: slice.length,
+			trashed,
+			total: flat.length,
+			nextOffset,
+			done: nextOffset >= flat.length,
+		};
+	} catch (error: unknown) {
+		console.error("Failed to move items to trash:", error);
+		return { error: clientMessage(error, "Failed to move items to trash") };
+	}
+}
+
+/**
+ * Restore trash entries back to their original keys (derived from the
+ * trash path — no metadata needed), then delete the trash copies.
+ */
+export async function restoreTrash(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	payload: { keys?: string[]; trashSrcPrefix?: string; offset?: number },
+) {
+	try {
+		const client = await getS3Client(ctx, connectionId);
+		const offset = Math.max(0, Math.floor(payload.offset ?? 0));
+
+		let sourceKeys: string[];
+		let total: number;
+
+		if (payload.trashSrcPrefix) {
+			const p = payload.trashSrcPrefix;
+			if (!p.startsWith(TRASH_PREFIX)) {
+				throw new AppError("Not a trash item");
+			}
+			const all = await expandMoveKeys(client, bucket, p);
+			total = all.length;
+			sourceKeys = all.slice(offset, offset + MAX_MOVE_OBJECTS);
+		} else {
+			const keys = payload.keys ?? [];
+			for (const k of keys) {
+				if (!k.startsWith(TRASH_PREFIX)) throw new AppError("Not a trash item");
+			}
+			if (keys.length > MAX_MOVE_OBJECTS) {
+				throw new AppError(
+					`Send at most ${MAX_MOVE_OBJECTS} objects per restore request.`,
+				);
+			}
+			total = keys.length;
+			sourceKeys = keys;
+		}
+
+		const restored: string[] = [];
+		const trashCopies: string[] = [];
+		let skipped = 0;
+
+		for (let i = 0; i < sourceKeys.length; i += 50) {
+			const chunk = sourceKeys.slice(i, i + 50);
+			await Promise.all(
+				chunk.map(async (key) => {
+					const parsed = parseTrashKey(key);
+					if (!parsed) {
+						skipped += 1;
+						return;
+					}
+					await client.send(
+						new CopyObjectCommand({
+							Bucket: bucket,
+							CopySource: encodeURIComponent(`${bucket}/${key}`),
+							Key: parsed.originalKey,
+						}),
+					);
+					restored.push(parsed.originalKey);
+					trashCopies.push(key);
+				}),
+			);
+		}
+
+		if (trashCopies.length > 0) {
+			const objects = trashCopies.map((key) => ({ Key: key }));
+			for (let i = 0; i < objects.length; i += 1000) {
+				await client.send(
+					new DeleteObjectsCommand({
+						Bucket: bucket,
+						Delete: { Objects: objects.slice(i, i + 1000) },
+					}),
+				);
+			}
+		}
+
+		const nextOffset = payload.trashSrcPrefix ? offset + sourceKeys.length : offset;
+		return {
+			success: true,
+			processed: restored.length,
+			restored,
+			skipped,
+			total,
+			nextOffset,
+			done: !payload.trashSrcPrefix || nextOffset >= total,
+		};
+	} catch (error: unknown) {
+		console.error("Failed to restore from trash:", error);
+		return { error: clientMessage(error, "Failed to restore from trash") };
+	}
+}
+
+/** Lazy purge: delete trash batches older than maxAgeDays (called when Trash opens). */
+export async function purgeTrash(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	maxAgeDays: number = TRASH_MAX_AGE_DAYS,
+) {
+	try {
+		const client = await getS3Client(ctx, connectionId);
+		const now = new Date();
+		const expired: string[] = [];
+		let continuationToken: string | undefined;
+		do {
+			const response = await client.send(
+				new ListObjectsV2Command({
+					Bucket: bucket,
+					Prefix: TRASH_PREFIX,
+					Delimiter: "/",
+					ContinuationToken: continuationToken,
+					MaxKeys: 1000,
+				}),
+			);
+			for (const cp of response.CommonPrefixes || []) {
+				const prefixStr = cp.Prefix;
+				if (!prefixStr) continue;
+				const stamp = prefixStr.slice(TRASH_PREFIX.length).replace(/\/$/, "");
+				const at = parseStamp(stamp);
+				if (at && isExpired(at, now, maxAgeDays)) expired.push(prefixStr);
+			}
+			continuationToken = response.NextContinuationToken;
+		} while (continuationToken);
+
+		let purgedObjects = 0;
+		for (const prefix of expired) {
+			const r = await deleteObjects(ctx, connectionId, bucket, [prefix]);
+			if (r.error) return { error: r.error };
+			purgedObjects += r.deleted ?? 0;
+		}
+		return { success: true, purgedBatches: expired.length, purgedObjects };
+	} catch (error: unknown) {
+		console.error("Failed to purge trash:", error);
+		return { error: clientMessage(error, "Failed to purge trash") };
+	}
+}
+
 export async function getDownloadUrl(
 	ctx: ServerContext,
 	connectionId: string,
@@ -808,6 +1026,7 @@ export async function searchObjects(
 					const name = prefixStr.slice(0, -1).split("/").pop() || "";
 					return { key: prefixStr, name, type: "folder" as const };
 				})
+				.filter((f) => f.key !== TRASH_PREFIX)
 				.filter((f) => f.name.toLowerCase().includes(lowerQuery));
 
 			allFolders.push(...folders);

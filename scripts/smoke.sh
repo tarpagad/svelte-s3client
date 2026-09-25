@@ -172,6 +172,10 @@ assert_eq "dashboard decrypts migrated connection" "3" "$COUNT"
 CONN_ID="$(printf '%s' "$DASH" | grep -o 'connections/[0-9a-f-]\{36\}' | head -1 | cut -d/ -f2)"
 assert_eq "connection id extractable" "yes" "$([ -n "$CONN_ID" ] && echo yes || echo no)"
 
+# trash route renders (purge+list against bogus creds degrade to empty)
+TRASH="$(curl -s -b "$JAR" "$BASE/dashboard/connections/$CONN_ID/buckets/smoke-bucket/trash")"
+assert_contains "trash page renders empty state" "Trash is empty" "$TRASH"
+
 # --- 6. S3 dispatcher error shapes -------------------------------------------
 
 echo "== s3 dispatcher error shapes =="
@@ -193,6 +197,11 @@ assert_contains "deleteFolder op routed (not 404)" "Connection not found" "$BFD"
 # move/copy + details + ACL-toggle ops are routed
 for OP in moveObjects makePrivate getObjectDetails; do
 	OPR="$(post_json "$JAR" "$JAR" "/api/s3/$OP" '{"connectionId":"nope","bucket":"b","key":"k","destPrefix":"","mode":"move"}')"
+	assert_contains "$OP op routed" "Connection not found" "$OPR"
+done
+# trash ops are routed (soft delete, restore, lazy purge)
+for OP in trashObjects restoreTrash purgeTrash; do
+	OPR="$(post_json "$JAR" "$JAR" "/api/s3/$OP" '{"connectionId":"nope","bucket":"b","keys":["k"],"trashSrcPrefix":"","maxAgeDays":30}')"
 	assert_contains "$OP op routed" "Connection not found" "$OPR"
 done
 

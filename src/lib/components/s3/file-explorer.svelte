@@ -19,12 +19,14 @@
 		Music,
 		Plus,
 		Search,
+		Trash2,
 		Video,
 	} from "@lucide/svelte";
 	import { toast } from "svelte-sonner";
 	import { callS3 } from "$lib/api";
 	import { isInsidePrefix } from "$lib/move-path";
 	import { runMove } from "$lib/move-run";
+	import { runRestore, runTrash } from "$lib/trash-run";
 	import Button from "$lib/components/ui/button.svelte";
 	import Card from "$lib/components/ui/card.svelte";
 	import CardContent from "$lib/components/ui/card-content.svelte";
@@ -372,21 +374,37 @@
 	};
 
 	async function handleDelete(key: string) {
-		if (!confirm("Are you sure you want to delete this?")) return;
+		if (!confirm("Move this item to the trash?")) return;
 
 		const previousObjects = [...objects];
 		objects = objects.filter((obj) => obj.key !== key);
 
-		const result = await callS3<{ success?: boolean; error?: string }>("deleteObject", {
-			connectionId,
-			bucket: bucketName,
-			key,
-		});
-		if (result.success) {
-			toast.success("Deleted successfully");
-		} else {
+		try {
+			const { count, trashed } = await runTrash({
+				connectionId,
+				bucket: bucketName,
+				keys: [key],
+			});
+			toast.success(
+				count > 1 ? `${count} items moved to trash` : "Moved to trash",
+				{
+					duration: 8000,
+					action: {
+						label: "Undo",
+						onClick: () => {
+							runRestore({ connectionId, bucket: bucketName, keys: trashed })
+								.then((n) => {
+									toast.success(n === 1 ? "Restored" : `${n} items restored`);
+									fetchObjects(prefix);
+								})
+								.catch(() => toast.error("Failed to restore"));
+						},
+					},
+				}
+			);
+		} catch (error: unknown) {
 			objects = previousObjects;
-			toast.error(result.error || "Failed to delete");
+			toast.error(error instanceof Error ? error.message : "Failed to delete");
 		}
 	}
 
@@ -634,6 +652,13 @@
 				<FolderPlus size={16} />
 				<span class="hidden sm:inline">New Folder</span>
 			</Button>
+			<a
+				href="/dashboard/connections/{connectionId}/buckets/{bucketName}/trash"
+				class="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-input bg-background text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors"
+			>
+				<Trash2 size={16} />
+				<span class="hidden sm:inline">Trash</span>
+			</a>
 		</div>
 	</div>
 

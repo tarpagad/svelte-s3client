@@ -3,6 +3,7 @@
 	import { toast } from "svelte-sonner";
 	import { Loader, Trash } from "@lucide/svelte";
 	import { callS3 } from "$lib/api";
+	import { runRestore, runTrash } from "$lib/trash-run";
 	import Button from "$lib/components/ui/button.svelte";
 
 	let {
@@ -45,24 +46,34 @@
 	async function handleDelete() {
 		isDeleting = true;
 		try {
-			const result = await callS3<{
-				success?: boolean;
-				deleted?: number;
-				error?: string;
-			}>("deleteObjects", { connectionId, bucket: bucketName, keys });
-			if (result.success) {
-				toast.success(
-					(result.deleted ?? 0) > 0
-						? `Deleted ${result.deleted} item${result.deleted === 1 ? "" : "s"}`
-						: "Items deleted",
-				);
-				onSuccess();
-				onClose();
-			} else {
-				toast.error(result.error || "Failed to delete items");
-			}
-		} catch {
-			toast.error("An unexpected error occurred");
+			const { count, trashed } = await runTrash({
+				connectionId,
+				bucket: bucketName,
+				keys,
+			});
+			toast.success(
+				`${count} item${count === 1 ? "" : "s"} moved to trash`,
+				{
+					duration: 8000,
+					action: {
+						label: "Undo",
+						onClick: () => {
+							runRestore({ connectionId, bucket: bucketName, keys: trashed })
+								.then((n) => {
+									toast.success(n === 1 ? "Restored" : `${n} items restored`);
+									onSuccess();
+								})
+								.catch(() => toast.error("Failed to restore"));
+						},
+					},
+				},
+			);
+			onSuccess();
+			onClose();
+		} catch (error: unknown) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to move items to trash",
+			);
 		} finally {
 			isDeleting = false;
 		}
@@ -102,15 +113,18 @@
 					<p class="font-medium text-destructive">
 						{itemCount}{itemCapReached ? "+" : ""} item{itemCount === 1
 							? ""
-							: "s"} will be deleted
+							: "s"} will be moved to Trash
 					</p>
 					{#if itemCapReached}
 						<p class="text-muted-foreground">
-							Count capped — large folders may contain more. This action is
-							permanent.
+							Count capped — large folders may contain more. Items stay in
+							Trash for 30 days before they are purged.
 						</p>
 					{:else}
-						<p class="text-muted-foreground">This action is permanent.</p>
+						<p class="text-muted-foreground">
+							Items stay in Trash for 30 days — restore them from the Trash
+							view.
+						</p>
 					{/if}
 				{/if}
 			</div>

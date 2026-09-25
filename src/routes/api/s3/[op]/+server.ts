@@ -131,6 +131,30 @@ case "moveObjects":
 						str(body, "key"),
 					),
 				);
+			case "trashObjects":
+				return json(
+					await s3.trashObjects(ctx, str(body, "connectionId"), str(body, "bucket"), {
+						keys: arr(body, "keys"),
+						offset: num(body, "offset", 0),
+					}),
+				);
+			case "restoreTrash":
+				return json(
+					await s3.restoreTrash(ctx, str(body, "connectionId"), str(body, "bucket"), {
+						keys: arr(body, "keys"),
+						trashSrcPrefix: str(body, "trashSrcPrefix"),
+						offset: num(body, "offset", 0),
+					}),
+				);
+			case "purgeTrash":
+				return json(
+					await s3.purgeTrash(
+						ctx,
+						str(body, "connectionId"),
+						str(body, "bucket"),
+						num(body, "maxAgeDays", 30),
+					),
+				);
 			case "getObjectDetails":
 				return json(
 					await s3.getObjectDetails(

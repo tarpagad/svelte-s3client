@@ -3,6 +3,7 @@
 	import { toast } from "svelte-sonner";
 	import { Folder, Loader2 } from "@lucide/svelte";
 	import { callS3 } from "$lib/api";
+	import { runRestore, runTrash } from "$lib/trash-run";
 	import Button from "$lib/components/ui/button.svelte";
 
 	let {
@@ -45,28 +46,36 @@
 	async function handleDelete() {
 		isDeleting = true;
 		try {
-			const result = await callS3<{
-				success?: boolean;
-				deleted?: number;
-				error?: string;
-			}>("deleteFolder", {
+			const { count, trashed } = await runTrash({
 				connectionId,
 				bucket: bucketName,
-				folderPrefix: folderKey,
+				keys: [folderKey],
 			});
-			if (result.success) {
-				toast.success(
-					(result.deleted ?? 0) > 0
-						? `Deleted ${result.deleted} item${result.deleted === 1 ? "" : "s"}`
-						: "Folder deleted",
-				);
-				onSuccess();
-				onClose();
-			} else {
-				toast.error(result.error || "Failed to delete folder");
-			}
-		} catch {
-			toast.error("An unexpected error occurred");
+			toast.success(
+				`${count} item${count === 1 ? "" : "s"} moved to trash`,
+				{
+					duration: 8000,
+					action: {
+						label: "Undo",
+						onClick: () => {
+							runRestore({ connectionId, bucket: bucketName, keys: trashed })
+								.then((n) => {
+									toast.success(n === 1 ? "Restored" : `${n} items restored`);
+									onSuccess();
+								})
+								.catch(() => toast.error("Failed to restore"));
+						},
+					},
+				},
+			);
+			onSuccess();
+			onClose();
+		} catch (error: unknown) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Failed to move folder to trash",
+			);
 		} finally {
 			isDeleting = false;
 		}
@@ -106,13 +115,13 @@
 					</p>
 					{#if itemCapReached}
 						<p class="text-muted-foreground">
-							Count capped — this folder may contain more. This action is
-							permanent. The folder and everything in it will be deleted.
+							Count capped — this folder may contain more. Items stay in
+							Trash for 30 days before they are purged.
 						</p>
 					{:else}
 						<p class="text-muted-foreground">
-							This action is permanent. The folder and everything in it will be
-							deleted.
+							Items stay in Trash for 30 days — restore the folder or its
+							files from the Trash view.
 						</p>
 					{/if}
 				{/if}
