@@ -141,6 +141,27 @@ value; other custom endpoints keep their configured region, plain S3 keeps the
 us-east-1 fallback. Applied at client-construction time, so existing cookies
 need no migration — takes effect on deploy.
 
+### ISSUE-009 — Live: AWS SDK XML parser used the browser variant — `DOMParser is not defined` in workerd
+- Severity: high (blocks every S3 operation in the deployed worker)
+- Status: fixed (pending commit/deploy)
+- Area: `wrangler.jsonc` (`alias`)
+
+The real error behind the live "Failed to list buckets" (captured from worker
+logs): `DOMParser is not defined at parseXML`. `@aws-sdk/xml-builder` ships two
+XML parsers and its package.json `browser` field maps `./dist-es/xml-parser` to
+a `DOMParser`-based variant. Wrangler's esbuild pass (platform `browser`) picks
+that variant when bundling `.svelte-kit/cloudflare/_worker.js`, but workerd has
+no DOM — so every S3 response deserialization throws. Locally invisible:
+`vite dev` loads the externalized SDK through Node, which uses the pure-JS
+`dist-cjs` parser. Fix: `"alias": { "@aws-sdk/xml-builder":
+"./node_modules/@aws-sdk/xml-builder/dist-cjs/index.js" }` in `wrangler.jsonc`
+(the dist-cjs build is self-contained, exports exactly `parseXML`/`XmlNode`/
+`XmlText`, and has no internal requires for the browser map to rewrite).
+Verified: `wrangler deploy --dry-run` bundle went from browser-parser-only to
+pure-JS-parser-only (0 `new DOMParser` refs), and an end-to-end `wrangler dev`
+run against a fake S3 endpoint rendered parsed buckets; `scripts/smoke.sh`
+40/40 green.
+
 ## Resolved
 
 ### ISSUE-000 — Weak passphrase policy stranded or corrupted key-lifecycle data

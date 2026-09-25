@@ -10,6 +10,12 @@
 		"cpu_ms": 300000
 	},
 	"main": ".svelte-kit/cloudflare/_worker.js",
+	"alias": {
+		// The package's `browser` field swaps in a DOMParser-based XML
+		// parser ("DOMParser is not defined" in workerd on every S3
+		// response); the dist-cjs build is self-contained pure JS.
+		"@aws-sdk/xml-builder": "./node_modules/@aws-sdk/xml-builder/dist-cjs/index.js"
+	},
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
