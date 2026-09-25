@@ -12,6 +12,9 @@ node_modules
 .DS_Store
 Thumbs.db
 
+# Tool artifacts
+.playwright-mcp/
+
 # Env
 .env
 .env.*
