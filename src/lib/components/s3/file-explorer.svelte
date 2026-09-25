@@ -5,14 +5,17 @@
 		ChevronRight,
 		CloudUpload,
 		Code2,
+		Copy as CopyIcon,
 		File as FileIcon,
 		Folder,
+		FolderInput,
 		FolderPlus,
 		Grid,
 		Image as ImageIcon,
 		Link as LinkIcon,
 		List as ListIcon,
 		Loader2,
+		Lock,
 		Music,
 		Plus,
 		Search,
@@ -20,6 +23,8 @@
 	} from "@lucide/svelte";
 	import { toast } from "svelte-sonner";
 	import { callS3 } from "$lib/api";
+	import { isInsidePrefix } from "$lib/move-path";
+	import { runMove } from "$lib/move-run";
 	import Button from "$lib/components/ui/button.svelte";
 	import Card from "$lib/components/ui/card.svelte";
 	import CardContent from "$lib/components/ui/card-content.svelte";
@@ -31,6 +36,7 @@
 	import BulkDeleteDialog from "./bulk-delete-dialog.svelte";
 	import ConfirmUploadDialog from "./confirm-upload-dialog.svelte";
 	import CreateFolderDialog from "./create-folder-dialog.svelte";
+	import MoveDialog from "./move-dialog.svelte";
 	import ObjectActions from "./object-actions.svelte";
 	import PreviewModal from "./preview-modal.svelte";
 	import UploadZone from "./upload-zone.svelte";
@@ -73,6 +79,9 @@
 	let droppedFiles = $state<File[]>([]);
 	let showConfirmUpload = $state(false);
 	let showBulkDelete = $state(false);
+	let bulkMoveMode = $state<"move" | "copy" | null>(null);
+	let dragKeys = $state<string[] | null>(null);
+	let dropTarget = $state<string | null>(null);
 
 	$effect(() => {
 		void objects;
@@ -97,6 +106,54 @@
 		} else {
 			selectedKeys = new Set(objects.map((o) => o.key));
 		}
+	}
+
+	const selectedFiles = $derived.by(() =>
+		[...selectedKeys].filter((k) => !k.endsWith("/"))
+	);
+	const selectedFolders = $derived.by(() =>
+		[...selectedKeys].filter((k) => k.endsWith("/"))
+	);
+	const selectedPublicFiles = $derived.by(() =>
+		objects.filter(
+			(o) => selectedKeys.has(o.key) && o.isPublic && o.type === "file"
+		)
+	);
+	const selectedPublicKeys = $derived.by(() =>
+		objects.filter((o) => selectedKeys.has(o.key) && o.isPublic).map((o) => o.key)
+	);
+
+	function handleBulkMove(mode: "move" | "copy") {
+		if (selectedKeys.size === 0) return;
+		bulkMoveMode = mode;
+	}
+
+	async function handleBulkMakePrivate() {
+		const keys = selectedPublicFiles.map((o) => o.key);
+		if (keys.length === 0) return;
+		if (
+			!confirm(
+				`Make ${keys.length} file${keys.length === 1 ? "" : "s"} private?`
+			)
+		)
+			return;
+
+		const promises = keys.map((key) =>
+			callS3<{ success?: boolean; error?: string }>("makePrivate", {
+				connectionId,
+				bucket: bucketName,
+				key,
+			})
+		);
+
+		toast.promise(Promise.all(promises), {
+			loading: "Updating permissions...",
+			success: () => {
+				fetchObjects(prefix);
+				return "Items are now private";
+			},
+			error: "Failed to update permissions",
+		});
 	}
 
 	function handleBulkDelete() {
@@ -344,10 +401,74 @@
 		});
 	}
 
+	function onRowDragStart(e: DragEvent, key: string) {
+		dragKeys =
+			selectedKeys.size > 0 && selectedKeys.has(key)
+				? [...selectedKeys]
+				: [key];
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = "move";
+			e.dataTransfer.setData("text/plain", key);
+		}
+	}
+
+	function onRowDragEnd() {
+		dragKeys = null;
+		dropTarget = null;
+	}
+
+	function onFolderDragOver(e: DragEvent, key: string) {
+		if (!dragKeys) return;
+		e.preventDefault();
+		e.stopPropagation();
+		dropTarget = key;
+	}
+
+	function onFolderDragLeave() {
+		dropTarget = null;
+	}
+
+	async function performDrop(keys: string[], destParent: string) {
+		dragKeys = null;
+		dropTarget = null;
+		if (keys.length === 0) return;
+		if (keys.some((k) => k.endsWith("/") && isInsidePrefix(k, destParent))) {
+			toast.error("Cannot move a folder into itself");
+			return;
+		}
+		const p = runMove({
+			connectionId,
+			bucket: bucketName,
+			mode: "move",
+			destParent,
+			fileKeys: keys.filter((k) => !k.endsWith("/")),
+			folderPrefixes: keys.filter((k) => k.endsWith("/")),
+		});
+		toast.promise(p, {
+			loading: "Moving items…",
+			success: (n: number) => `${n} item${n === 1 ? "" : "s"} moved`,
+			error: "Move failed",
+		});
+		try {
+			await p;
+			selectedKeys = new Set();
+			await fetchObjects(prefix);
+		} catch {
+			// surfaced via toast.promise
+		}
+	}
+
+	function onFolderDrop(e: DragEvent, destParent: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		void performDrop(dragKeys ?? [], destParent);
+	}
+
 	function onGlobalDragOver(e: DragEvent) {
 		e.preventDefault();
 		e.stopPropagation();
-		isDragActive = true;
+		// Internal row drags carry no files — keep the upload overlay off.
+		if (e.dataTransfer?.types.includes("Files")) isDragActive = true;
 	}
 
 	function onGlobalDragLeave(e: DragEvent) {
@@ -427,7 +548,13 @@
 		</div>
 	{/if}
 	<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-		<Breadcrumbs {bucketName} {prefix} onNavigate={(p) => fetchObjects(p)} />
+		<Breadcrumbs
+			{bucketName}
+			{prefix}
+			onNavigate={(p) => fetchObjects(p)}
+			canDrop={dragKeys !== null}
+			onDrop={(p) => performDrop(dragKeys ?? [], p)}
+		/>
 
 		<div class="flex items-center gap-2">
 			<div class="relative w-full md:w-64">
@@ -543,11 +670,37 @@
 				<Button
 					variant="ghost"
 					size="sm"
+					onclick={() => handleBulkMove("move")}
+					class="hover:bg-background/20 text-background hover:text-background h-8"
+				>
+					Move
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => handleBulkMove("copy")}
+					class="hover:bg-background/20 text-background hover:text-background h-8"
+				>
+					Copy
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
 					onclick={handleBulkMakePublic}
 					class="hover:bg-background/20 text-background hover:text-background h-8"
 				>
 					Make Public
 				</Button>
+				{#if selectedPublicFiles.length > 0 && connectionType === "s3"}
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={handleBulkMakePrivate}
+						class="hover:bg-background/20 text-background hover:text-background h-8"
+					>
+						Make Private
+					</Button>
+				{/if}
 				<Button
 					variant="ghost"
 					size="sm"
@@ -604,6 +757,9 @@
 						{/if}
 						{#each sortedObjects as obj (obj.key)}
 							<tr
+								draggable="true"
+								ondragstart={(e) => onRowDragStart(e, obj.key)}
+								ondragend={onRowDragEnd}
 								class={cn(
 									"hover:bg-muted/30 transition-colors group",
 									selectedKeys.has(obj.key) && "bg-primary/5 hover:bg-primary/10"
@@ -624,7 +780,18 @@
 									/>
 								</td>
 								<td class="px-4 py-3">
-									<div class="flex items-center gap-3">
+									<div
+										role="group"
+										class={cn(
+											"flex items-center gap-3 rounded-md px-1 -mx-1 py-0.5",
+											dropTarget === obj.key && "ring-2 ring-primary bg-primary/10"
+										)}
+										ondragover={(e) =>
+											obj.type === "folder" && onFolderDragOver(e, obj.key)}
+										ondragleave={onFolderDragLeave}
+										ondrop={(e) =>
+											obj.type === "folder" && onFolderDrop(e, obj.key)}
+									>
 										{@render fileIcon(obj)}
 										{#if obj.type === "folder"}
 											<button
@@ -676,6 +843,7 @@
 											{connectionId}
 											{bucketName}
 											object={obj}
+											currentPrefix={prefix}
 											onRefresh={() => fetchObjects(prefix)}
 											onDelete={handleDelete}
 											onRename={handleOptimisticRename}
@@ -691,10 +859,18 @@
 			<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
 				{#each sortedObjects as obj (obj.key)}
 					<Card
+						draggable="true"
+						ondragstart={(e) => onRowDragStart(e, obj.key)}
+						ondragend={onRowDragEnd}
+						ondragover={(e) =>
+							obj.type === "folder" && onFolderDragOver(e, obj.key)}
+						ondragleave={onFolderDragLeave}
+						ondrop={(e) => obj.type === "folder" && onFolderDrop(e, obj.key)}
 						class={cn(
 							"group hover:border-primary/50 transition-all cursor-pointer relative",
 							obj.type === "folder" ? "bg-primary/5" : "bg-card/40",
-							selectedKeys.has(obj.key) && "border-primary bg-primary/10"
+							selectedKeys.has(obj.key) && "border-primary bg-primary/10",
+							dropTarget === obj.key && "ring-2 ring-primary"
 						)}
 						onclick={(e) => {
 							if (e.ctrlKey || e.metaKey) {
@@ -745,6 +921,7 @@
 										{connectionType}
 										{publicUrl}
 										object={obj}
+										currentPrefix={prefix}
 										onRefresh={() => fetchObjects(prefix)}
 										onDelete={handleDelete}
 										onRename={handleOptimisticRename}
@@ -855,6 +1032,26 @@
 			{bucketName}
 			object={previewObject}
 			onClose={() => (previewObject = null)}
+		/>
+	{/if}
+
+	{#if bulkMoveMode}
+		<MoveDialog
+			{connectionId}
+			{bucketName}
+			mode={bulkMoveMode}
+			fileKeys={selectedFiles}
+			folderPrefixes={selectedFolders}
+			srcName={selectedKeys.size === 1
+				? (objects.find((o) => selectedKeys.has(o.key))?.name ?? "")
+				: undefined}
+			currentPrefix={prefix}
+			publicKeys={selectedPublicKeys}
+			onClose={() => (bulkMoveMode = null)}
+			onSuccess={() => {
+				selectedKeys = new Set();
+				fetchObjects(prefix);
+			}}
 		/>
 	{/if}
 

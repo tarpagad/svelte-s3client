@@ -5,6 +5,7 @@ import {
 	GetObjectAclCommand,
 	GetObjectCommand,
 	HeadBucketCommand,
+	HeadObjectCommand,
 	ListBucketsCommand,
 	ListObjectsV2Command,
 	PutObjectAclCommand,
@@ -16,6 +17,11 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getDecryptedConnection } from "./connections";
 import type { ServerContext } from "./context";
+import {
+	destKeyForKey,
+	destKeyForPrefix,
+	isInsidePrefix,
+} from "$lib/move-path";
 import type {
 	BucketInfo,
 	ListObjectsResponse,
@@ -36,6 +42,11 @@ function clientMessage(error: unknown, fallback: string): string {
 // Bulk delete/count folder expansion cap: keeps the listing loop bounded
 // (subrequest budget) and the confirmation dialog meaningful.
 const MAX_BULK_DELETE_OBJECTS = 5000;
+
+// CopyObject costs one subrequest per object (no batching like
+// DeleteObjects), so move/copy requests stay well under the1000
+// subrequests/invocation cap even with ACL re-applies and listings.
+const MAX_MOVE_OBJECTS = 400;
 
 /**
  * Object ACLs are an AWS S3 concept; S3-compatible stores (R2, MinIO,
@@ -472,6 +483,151 @@ export async function renameObject(
 	}
 }
 
+export async function moveObjects(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	payload: {
+		keys?: string[];
+		srcPrefix?: string;
+		destPrefix: string;
+		mode: "move" | "copy";
+		publicKeys?: string[];
+		offset?: number;
+	},
+) {
+	try {
+		const client = await getS3Client(ctx, connectionId);
+
+		const srcPrefix = payload.srcPrefix
+			? payload.srcPrefix.endsWith("/")
+				? payload.srcPrefix
+				: `${payload.srcPrefix}/`
+			: "";
+		const destPrefix = payload.destPrefix;
+
+		if (srcPrefix && isInsidePrefix(srcPrefix, destPrefix)) {
+			throw new AppError("Cannot move or copy a folder into itself.");
+		}
+
+		let sourceKeys: string[];
+		let total: number;
+		const offset = Math.max(0, Math.floor(payload.offset ?? 0));
+
+		if (srcPrefix) {
+			const all = await expandMoveKeys(client, bucket, srcPrefix);
+			total = all.length;
+			sourceKeys = all.slice(offset, offset + MAX_MOVE_OBJECTS);
+		} else {
+			// Explicit selection: folders are sent one srcPrefix call each,
+			// so markers never reach this branch.
+			const keys = (payload.keys ?? []).filter((k) => !k.endsWith("/"));
+			if (keys.length > MAX_MOVE_OBJECTS) {
+				throw new AppError(
+					`Send at most ${MAX_MOVE_OBJECTS} objects per move request.`,
+				);
+			}
+			total = keys.length;
+			sourceKeys = keys;
+		}
+
+		const publicSet = new Set(payload.publicKeys ?? []);
+		const copiedSources: string[] = [];
+		let skipped = 0;
+
+		for (let i = 0; i < sourceKeys.length; i += 50) {
+			const chunk = sourceKeys.slice(i, i + 50);
+			await Promise.all(
+				chunk.map(async (key) => {
+					const destKey = srcPrefix
+						? destKeyForPrefix(key, srcPrefix, destPrefix)
+						: destKeyForKey(key, destPrefix);
+					if (destKey === key) {
+						skipped += 1;
+						return;
+					}
+					await client.send(
+						new CopyObjectCommand({
+							Bucket: bucket,
+							CopySource: encodeURIComponent(`${bucket}/${key}`),
+							Key: destKey,
+						}),
+					);
+					if (publicSet.has(key)) {
+						await client.send(
+							new PutObjectAclCommand({
+								Bucket: bucket,
+								Key: destKey,
+								ACL: "public-read",
+							}),
+						);
+					}
+					copiedSources.push(key);
+				}),
+			);
+		}
+
+		if (payload.mode === "move" && copiedSources.length > 0) {
+			const objects = copiedSources.map((key) => ({ Key: key }));
+			const batchSize = 1000;
+			for (let i = 0; i < objects.length; i += batchSize) {
+				await client.send(
+					new DeleteObjectsCommand({
+						Bucket: bucket,
+						Delete: { Objects: objects.slice(i, i + batchSize) },
+					}),
+				);
+			}
+		}
+
+		const processed = copiedSources.length;
+		// Prefix mode pages through large folders across requests (offset on
+		// a stable lexicographic expansion); key batches are always whole.
+		const nextOffset = srcPrefix ? offset + sourceKeys.length : offset;
+		return {
+			success: true,
+			processed,
+			total,
+			nextOffset,
+			done: !srcPrefix || nextOffset >= total,
+			skipped,
+		};
+	} catch (error: unknown) {
+		console.error("Failed to move objects:", error);
+		return { error: clientMessage(error, "Failed to move objects") };
+	}
+}
+
+/** Recursively expand a folder prefix; stable lexicographic order for offset paging. */
+async function expandMoveKeys(
+	client: S3Client,
+	bucket: string,
+	srcPrefix: string,
+): Promise<string[]> {
+	const keys: string[] = [];
+	let continuationToken: string | undefined;
+	do {
+		const response = await client.send(
+			new ListObjectsV2Command({
+				Bucket: bucket,
+				Prefix: srcPrefix,
+				ContinuationToken: continuationToken,
+				MaxKeys: 1000,
+			}),
+		);
+		for (const c of response.Contents || []) {
+			if (c.Key) keys.push(c.Key);
+		}
+		if (keys.length > MAX_BULK_DELETE_OBJECTS) {
+			throw new AppError(
+				`Folder contents exceed the ${MAX_BULK_DELETE_OBJECTS}-object limit. Move it in smaller batches.`,
+			);
+		}
+		continuationToken = response.NextContinuationToken;
+	} while (continuationToken);
+	return keys;
+}
+
 export async function getDownloadUrl(
 	ctx: ServerContext,
 	connectionId: string,
@@ -559,6 +715,28 @@ export async function makePublic(
 	} catch (error: unknown) {
 		console.error("Failed to make object public:", error);
 		return { error: clientMessage(error, "Failed to set public access") };
+	}
+}
+
+export async function makePrivate(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	key: string,
+) {
+	try {
+		const client = await getS3Client(ctx, connectionId);
+		await client.send(
+			new PutObjectAclCommand({
+				Bucket: bucket,
+				Key: key,
+				ACL: "private",
+			}),
+		);
+		return { success: true };
+	} catch (error: unknown) {
+		console.error("Failed to make object private:", error);
+		return { error: clientMessage(error, "Failed to remove public access") };
 	}
 }
 
@@ -703,6 +881,34 @@ export async function searchObjects(
 		console.error("Search failed:", error);
 		if (error instanceof AppError) throw error;
 		throw new Error(clientMessage(error, "Search failed"));
+	}
+}
+
+export async function getObjectDetails(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	key: string,
+) {
+	try {
+		if (key.endsWith("/")) {
+			throw new AppError("Folders have no object details");
+		}
+		const client = await getS3Client(ctx, connectionId);
+		const r = await client.send(
+			new HeadObjectCommand({ Bucket: bucket, Key: key }),
+		);
+		return {
+			contentType: r.ContentType ?? "",
+			contentLength: r.ContentLength ?? 0,
+			etag: r.ETag ?? "",
+			lastModified: r.LastModified ?? null,
+			storageClass: r.StorageClass ?? "STANDARD",
+			metadata: r.Metadata ?? {},
+		};
+	} catch (error: unknown) {
+		console.error("Failed to fetch object details:", error);
+		return { error: clientMessage(error, "Failed to fetch object details") };
 	}
 }
 

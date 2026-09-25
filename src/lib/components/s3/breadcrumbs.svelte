@@ -6,10 +6,14 @@
 		bucketName,
 		prefix,
 		onNavigate,
+		onDrop,
+		canDrop = false,
 	}: {
 		bucketName: string;
 		prefix: string;
 		onNavigate: (prefix: string) => void;
+		onDrop?: (prefix: string) => void;
+		canDrop?: boolean;
 	} = $props();
 
 	const parts = $derived(prefix.split("/").filter(Boolean));
@@ -19,6 +23,15 @@
 	<button
 		type="button"
 		onclick={() => onNavigate("")}
+		ondragover={(e) => {
+			if (canDrop) e.preventDefault();
+		}}
+		ondrop={(e) => {
+			if (!canDrop) return;
+			e.preventDefault();
+			e.stopPropagation();
+			onDrop?.("");
+		}}
 		class="flex items-center hover:text-foreground transition-colors"
 	>
 		<Home size={16} class="mr-1" />
@@ -32,6 +45,15 @@
 			<button
 				type="button"
 				onclick={() => onNavigate(currentPrefix)}
+				ondragover={(e) => {
+					if (canDrop) e.preventDefault();
+				}}
+				ondrop={(e) => {
+					if (!canDrop) return;
+					e.preventDefault();
+					e.stopPropagation();
+					onDrop?.(currentPrefix);
+				}}
 				class={cn(
 					"hover:text-foreground transition-colors truncate max-w-[150px]",
 					index === parts.length - 1 ? "text-foreground font-semibold" : ""

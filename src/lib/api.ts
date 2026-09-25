@@ -43,3 +43,15 @@ export async function callKeyApi<T = unknown>(
 	});
 	return (await res.json()) as T;
 }
+
+/** Sequential batch walker for ops capped per request (e.g. move/copy). */
+export async function callS3Batches(
+	op: string,
+	batches: Record<string, unknown>[],
+	onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+	for (let i = 0; i < batches.length; i++) {
+		await callS3(op, batches[i]);
+		onProgress?.(i + 1, batches.length);
+	}
+}

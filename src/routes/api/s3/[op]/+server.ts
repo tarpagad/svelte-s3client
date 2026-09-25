@@ -111,7 +111,36 @@ export const POST: RequestHandler = async (event) => {
 						str(body, "key"),
 					),
 				);
-			case "getFileContent":
+case "moveObjects":
+				return json(
+					await s3.moveObjects(ctx, str(body, "connectionId"), str(body, "bucket"), {
+						keys: arr(body, "keys"),
+						srcPrefix: str(body, "srcPrefix"),
+						destPrefix: str(body, "destPrefix"),
+						mode: str(body, "mode") === "copy" ? "copy" : "move",
+						publicKeys: arr(body, "publicKeys"),
+						offset: num(body, "offset", 0),
+					}),
+				);
+			case "makePrivate":
+				return json(
+					await s3.makePrivate(
+						ctx,
+						str(body, "connectionId"),
+						str(body, "bucket"),
+						str(body, "key"),
+					),
+				);
+			case "getObjectDetails":
+				return json(
+					await s3.getObjectDetails(
+						ctx,
+						str(body, "connectionId"),
+						str(body, "bucket"),
+						str(body, "key"),
+					),
+				);
+						case "getFileContent":
 				return json(
 					await s3.getFileContent(
 						ctx,
