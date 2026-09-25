@@ -13,7 +13,7 @@ Nothing in progress. Clean checkpoint.
 
 ## Next
 
-- [ ] **Deploy ISSUE-004/ISSUE-005/ISSUE-007/ISSUE-008/ISSUE-009 fixes** — all are local-only; push to ship them, then re-run `./scripts/smoke.sh` against prod URL once green (ISSUE-008 also fixes existing live R2 connections with no cookie migration; ISSUE-009 is the live `DOMParser` blocker).
+Nothing queued.
 
 ## Later
 
@@ -25,6 +25,7 @@ Nothing in progress. Clean checkpoint.
 
 ## Done
 
+- [x] Deploy ISSUE-004/005/007/008/009 to production — `652b1c5` + `99bbb76` shipped as version `21ff54b6` (https://svelte-s3client.f-a.workers.dev); `./scripts/smoke.sh` against prod URL: 40/40 green. Live R2 connections fixed with no cookie migration (region read at client-construction time).
 - [x] Live `DOMParser is not defined`: wrangler's browser-platform bundling picked `@aws-sdk/xml-builder`'s DOMParser-based `browser` variant, which workerd lacks — aliased the package to its self-contained pure-JS `dist-cjs` build in `wrangler.jsonc`; verified via dry-run bundle grep, e2e bucket listing against a fake S3 endpoint under `wrangler dev`, and smoke 40/40 (see ISSUE-009).
 - [x] Live R2 listing failure: `getS3Client` signed with the stored `us-east-1` (pre-`8302629` default) instead of R2's required `auto` → SignatureDoesNotMatch on every call; R2 connections now always sign `auto` (see ISSUE-008).
 - [x] Dev cookie collision: `writeConnections` deleted the key cookie it had just set (legacy names == primary names in dev), orphaning `s3-connections` — every later add logged two `Cipher job failed` errors and dropped existing connections; migration also probed the just-added blob with the legacy key (spurious error) (see ISSUE-007).

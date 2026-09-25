@@ -19,7 +19,7 @@ Rules:
 
 ### ISSUE-007 — Dev cookie-name collision stranded the visitor key (decryption errors, connection loss)
 - Severity: high (dev-only; prod names never collide)
-- Status: fixed (pending commit)
+- Status: fixed (652b1c5)
 - Area: `src/lib/server/connections.ts` (`writeConnections`), `src/lib/encryption.ts`
 
 In `vite dev` the primary cookie names ARE the legacy names (`s3-key`/
@@ -127,7 +127,7 @@ the decision is explicit.
 
 ### ISSUE-008 — Live: R2 connection fails bucket listing with only a generic client error
 - Severity: medium
-- Status: fixed (pending commit/deploy)
+- Status: fixed (652b1c5, deployed 21ff54b6)
 - Area: `src/lib/server/s3.ts` (`getS3Client`)
 
 Opening a connection on the deployed site showed "Connection Error / Failed to
@@ -143,7 +143,7 @@ need no migration — takes effect on deploy.
 
 ### ISSUE-009 — Live: AWS SDK XML parser used the browser variant — `DOMParser is not defined` in workerd
 - Severity: high (blocks every S3 operation in the deployed worker)
-- Status: fixed (pending commit/deploy)
+- Status: fixed (99bbb76, deployed 21ff54b6)
 - Area: `wrangler.jsonc` (`alias`)
 
 The real error behind the live "Failed to list buckets" (captured from worker
