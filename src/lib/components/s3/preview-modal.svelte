@@ -6,6 +6,8 @@
 		FileText,
 		Image as ImageIcon,
 		Loader2,
+		Music,
+		Video as VideoIcon,
 		X,
 	} from "@lucide/svelte";
 	import { toast } from "svelte-sonner";
@@ -28,7 +30,9 @@
 	let loading = $state(true);
 	let downloadUrl = $state<string | null>(null);
 	let textContent = $state<string | null>(null);
-	let previewType = $state<"image" | "text" | "pdf" | "other">("other");
+	let previewType = $state<
+		"image" | "text" | "pdf" | "video" | "audio" | "other"
+	>("other");
 
 	$effect(() => {
 		let cancelled = false;
@@ -47,6 +51,22 @@
 				if (!cancelled && result.url) downloadUrl = result.url;
 			} else if (["pdf"].includes(ext)) {
 				previewType = "pdf";
+				const result = await callS3<{ url?: string; error?: string }>("getDownloadUrl", {
+					connectionId,
+					bucket: bucketName,
+					key: object.key,
+				});
+				if (!cancelled && result.url) downloadUrl = result.url;
+			} else if (["mp4", "webm", "mov", "avi", "mkv"].includes(ext)) {
+				previewType = "video";
+				const result = await callS3<{ url?: string; error?: string }>("getDownloadUrl", {
+					connectionId,
+					bucket: bucketName,
+					key: object.key,
+				});
+				if (!cancelled && result.url) downloadUrl = result.url;
+			} else if (["mp3", "wav", "ogg", "flac", "m4a"].includes(ext)) {
+				previewType = "audio";
 				const result = await callS3<{ url?: string; error?: string }>("getDownloadUrl", {
 					connectionId,
 					bucket: bucketName,
@@ -113,6 +133,10 @@
 				<div class="p-2 bg-primary/10 rounded-lg text-primary">
 					{#if previewType === "image"}
 						<ImageIcon size={20} />
+					{:else if previewType === "video"}
+						<VideoIcon size={20} />
+					{:else if previewType === "audio"}
+						<Music size={20} />
 					{:else if previewType === "text"}
 						<FileText size={20} />
 					{:else}
@@ -148,6 +172,22 @@
 						alt={object.name}
 						class="max-w-full max-h-[60vh] rounded-lg shadow-lg object-contain bg-white/5"
 					/>
+				</div>
+			{:else if previewType === "video" && downloadUrl}
+				<video
+					controls
+					playsinline
+					src={downloadUrl}
+					class="max-w-full max-h-[60vh] rounded-lg bg-black shadow-lg"
+				></video>
+			{:else if previewType === "audio" && downloadUrl}
+				<div
+					class="w-full max-w-md bg-card border rounded-2xl p-8 flex flex-col items-center gap-6 shadow-sm"
+				>
+					<div class="p-4 bg-primary/10 rounded-full text-primary">
+						<Music size={32} />
+					</div>
+					<audio controls src={downloadUrl} class="w-full"></audio>
 				</div>
 			{:else if previewType === "pdf" && downloadUrl}
 				<iframe src={downloadUrl} class="w-full h-[60vh] rounded-lg border shadow-sm" title={object.name}></iframe>

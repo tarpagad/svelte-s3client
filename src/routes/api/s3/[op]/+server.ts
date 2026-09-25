@@ -52,7 +52,9 @@ export const POST: RequestHandler = async (event) => {
 						| "date-desc"
 						| "date-asc"
 						| "name-asc"
-						| "name-desc",
+						| "name-desc"
+						| "size-asc"
+						| "size-desc",
 					),
 				);
 			case "searchObjects":

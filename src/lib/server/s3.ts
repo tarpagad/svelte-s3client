@@ -213,7 +213,13 @@ export async function listObjects(
 	prefix: string = "",
 	maxKeys: number = 100,
 	continuationToken?: string,
-	sortBy: "date-desc" | "date-asc" | "name-asc" | "name-desc" = "date-desc",
+	sortBy:
+		| "date-desc"
+		| "date-asc"
+		| "name-asc"
+		| "name-desc"
+		| "size-asc"
+		| "size-desc" = "date-desc",
 ): Promise<ListObjectsResponse> {
 	try {
 		const client = await getS3Client(ctx, connectionId);
@@ -296,6 +302,12 @@ export async function listObjects(
 			}
 			if (sortBy === "date-asc") {
 				return (a.LastModified?.getTime() || 0) - (b.LastModified?.getTime() || 0);
+			}
+			if (sortBy === "size-desc") {
+				return (b.Size ?? 0) - (a.Size ?? 0);
+			}
+			if (sortBy === "size-asc") {
+				return (a.Size ?? 0) - (b.Size ?? 0);
 			}
 			const nameA = a.Key.split("/").pop() || "";
 			const nameB = b.Key.split("/").pop() || "";
