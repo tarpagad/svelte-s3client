@@ -173,6 +173,16 @@ export async function writeConnections(
 		if (legacyKey && connections.length > 0) {
 			const migrated: StoredConnection[] = [];
 			for (const conn of connections) {
+				// A blob already under this request's key (e.g. the connection
+				// added moments ago) needs no migration; probing it with the
+				// legacy key would fail and log a spurious error.
+				const underWriteKey = await decrypt(conn.encryptedCredentials, key, {
+					quiet: true,
+				});
+				if (underWriteKey !== null) {
+					migrated.push(conn);
+					continue;
+				}
 				const inner = await decrypt(conn.encryptedCredentials, legacyKey);
 				migrated.push({
 					...conn,
@@ -190,9 +200,16 @@ export async function writeConnections(
 	const encrypted = await encrypt(jsonStr, key);
 
 	// Migration: clear the legacy (unprefixed) cookies so the __Host- pair
-	// becomes the only copy. The new __Host- cookies were just set above.
-	ctx.cookies.delete(LEGACY_COOKIE_NAME, { path: "/" });
-	ctx.cookies.delete(LEGACY_KEY_COOKIE_NAME, { path: "/" });
+	// becomes the only copy. In dev the primary names ARE the unprefixed
+	// ones, so deleting unconditionally would remove the cookies just set
+	// (SvelteKit lets a later delete overwrite a pending set) — stranding
+	// the visitor key and leaving an undecryptable connections cookie.
+	if (LEGACY_COOKIE_NAME !== COOKIE_NAME) {
+		ctx.cookies.delete(LEGACY_COOKIE_NAME, { path: "/" });
+	}
+	if (LEGACY_KEY_COOKIE_NAME !== KEY_COOKIE_NAME) {
+		ctx.cookies.delete(LEGACY_KEY_COOKIE_NAME, { path: "/" });
+	}
 
 	ctx.cookies.set(COOKIE_NAME, encrypted, baseCookieOptions());
 }

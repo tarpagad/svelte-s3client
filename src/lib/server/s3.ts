@@ -60,19 +60,30 @@ export async function getS3Client(
 		throw new AppError("Connection not found");
 	}
 
+	// R2 always signs with region `auto` (Cloudflare requirement). The
+	// stored region must not win there: connections saved before 8302629
+	// carry the old `us-east-1` default, which R2 rejects with
+	// SignatureDoesNotMatch. Other custom endpoints (MinIO, …) keep their
+	// configured region; plain S3 falls back to us-east-1.
+	const region =
+		connection.type === "r2"
+			? "auto"
+			: connection.endpoint
+				? connection.region || "auto"
+				: connection.region || "us-east-1";
+
 	const config: S3ClientConfig = {
 		credentials: {
 			accessKeyId: connection.accessKeyId,
 			secretAccessKey: connection.secretAccessKey,
 		},
-		region: connection.region || "us-east-1",
+		region,
 		followRegionRedirects: true,
 	};
 
 	if (connection.endpoint) {
 		config.endpoint = connection.endpoint;
 		config.forcePathStyle = true;
-		config.region = connection.region || "auto";
 	}
 
 	return new S3Client(config);

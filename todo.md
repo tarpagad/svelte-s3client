@@ -13,7 +13,7 @@ Nothing in progress. Clean checkpoint.
 
 ## Next
 
-- [ ] **Deploy ISSUE-004/ISSUE-005 fixes** — both are local-only; push to ship them, then re-run `./scripts/smoke.sh` against prod URL once green.
+- [ ] **Deploy ISSUE-004/ISSUE-005/ISSUE-007/ISSUE-008 fixes** — all are local-only; push to ship them, then re-run `./scripts/smoke.sh` against prod URL once green (ISSUE-008 also fixes existing live R2 connections with no cookie migration).
 
 ## Later
 
@@ -25,6 +25,8 @@ Nothing in progress. Clean checkpoint.
 
 ## Done
 
+- [x] Live R2 listing failure: `getS3Client` signed with the stored `us-east-1` (pre-`8302629` default) instead of R2's required `auto` → SignatureDoesNotMatch on every call; R2 connections now always sign `auto` (see ISSUE-008).
+- [x] Dev cookie collision: `writeConnections` deleted the key cookie it had just set (legacy names == primary names in dev), orphaning `s3-connections` — every later add logged two `Cipher job failed` errors and dropped existing connections; migration also probed the just-added blob with the legacy key (spurious error) (see ISSUE-007).
 - [x] Security audit → 6-phase remediation plan (2026-09-23)
 - [x] Phase 1 — security headers, per-visitor key foundation (`1a8d508`)
 - [x] Phase 2 — passphrase strength policy, safe key lifecycle (set/remove/change) (`51161e3`)

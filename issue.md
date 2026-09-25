@@ -17,6 +17,28 @@ Rules:
 
 ## Open
 
+### ISSUE-007 — Dev cookie-name collision stranded the visitor key (decryption errors, connection loss)
+- Severity: high (dev-only; prod names never collide)
+- Status: fixed (pending commit)
+- Area: `src/lib/server/connections.ts` (`writeConnections`), `src/lib/encryption.ts`
+
+In `vite dev` the primary cookie names ARE the legacy names (`s3-key`/
+`s3-connections`), but `writeConnections` unconditionally deleted the legacy
+names after setting the primary ones. SvelteKit stores pending cookies in a
+map, so the later delete overwrote the just-set key cookie: every dev write
+emitted `s3-key=; Max-Age=0` and left an **orphaned `s3-connections` cookie
+with no readable key**. Every subsequent read then failed to decrypt
+(`OperationError: Cipher job failed`) — twice per add (outer-cookie read +
+legacy migration probing the just-added blob, which is encrypted under the new
+key and can never decrypt under the legacy one) — and because `readConnections`
+returns `[]` on failure, each add silently discarded all previous connections.
+Reproduced with two curl POSTs: first add logs 1 spurious error, each later add
+logs exactly the two reported errors. Fix: skip the legacy-cookie deletes when
+the legacy name equals the primary name, and make the migration probe
+(`decrypt(..., { quiet: true })`) skip blobs already under the write key.
+Leftover orphan cookies are unrecoverable (their key is gone); the first write
+after the fix logs one decrypt error while reading them, then replaces them.
+
 ### ISSUE-006 — CSP blocked Vite 8's blob: SharedWorker (dev HMR reconnect dead)
 - Severity: medium (dev-only; no prod impact)
 - Status: fixed (live browser verification)
@@ -102,6 +124,22 @@ round-trip). Values are validated with Zod on read, so tampering is bounded to
 can set arbitrary valid pref values for themselves — no integrity issue beyond
 self-affecting state. Acceptable for a credential-isolating tool; recorded so
 the decision is explicit.
+
+### ISSUE-008 — Live: R2 connection fails bucket listing with only a generic client error
+- Severity: medium
+- Status: fixed (pending commit/deploy)
+- Area: `src/lib/server/s3.ts` (`getS3Client`)
+
+Opening a connection on the deployed site showed "Connection Error / Failed to
+list buckets". Root cause confirmed: connections created before `8302629`
+stored `region: "us-east-1"` (old action default), and `getS3Client` signed R2
+requests with the stored region — R2 requires `auto`, so every call failed with
+SignatureDoesNotMatch. The generic `clientMessage` fallback also hid the real
+SDK error from the client (it only ever reached worker logs). Fix: R2
+connections (`type === "r2"`) always use region `auto`, ignoring the stored
+value; other custom endpoints keep their configured region, plain S3 keeps the
+us-east-1 fallback. Applied at client-construction time, so existing cookies
+need no migration — takes effect on deploy.
 
 ## Resolved
 

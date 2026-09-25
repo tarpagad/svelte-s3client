@@ -56,6 +56,7 @@ export async function encrypt(text: string, secret: string): Promise<string> {
 export async function decrypt(
 	encryptedText: string,
 	secret: string,
+	options?: { quiet?: boolean },
 ): Promise<string | null> {
 	try {
 		const combinedStr = atob(encryptedText);
@@ -82,7 +83,11 @@ export async function decrypt(
 		const decoder = new TextDecoder();
 		return decoder.decode(decrypted);
 	} catch (error) {
-		console.error("Decryption failed:", error);
+		// `quiet` probes (e.g. "is this blob already under the new key?")
+		// expect failures and must not spam the server log.
+		if (!options?.quiet) {
+			console.error("Decryption failed:", error);
+		}
 		return null;
 	}
 }
