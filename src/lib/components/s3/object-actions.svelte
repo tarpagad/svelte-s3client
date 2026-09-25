@@ -12,6 +12,7 @@
 		Trash2,
 	} from "@lucide/svelte";
 	import { toast } from "svelte-sonner";
+	import { markRecent } from "$lib/activity";
 	import { callS3 } from "$lib/api";
 	import Button from "$lib/components/ui/button.svelte";
 	import type { BucketConnectionType, S3ObjectInfo } from "$lib/types";
@@ -85,6 +86,7 @@
 				key: object.key,
 			});
 			if (result.url) {
+				markRecent(connectionId, bucketName, object.key);
 				window.open(result.url, "_blank");
 			} else {
 				toast.error(result.error || "Failed to get download URL");
@@ -162,6 +164,7 @@
 				<button
 					type="button"
 					onclick={() => {
+						markRecent(connectionId, bucketName, object.key);
 						showPreview = true;
 						isOpen = false;
 					}}

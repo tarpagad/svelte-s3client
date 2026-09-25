@@ -3,6 +3,7 @@
 	import {
 		ChevronLeft,
 		ChevronRight,
+		Clock,
 		CloudUpload,
 		Code2,
 		Copy as CopyIcon,
@@ -19,10 +20,18 @@
 		Music,
 		Plus,
 		Search,
+		Star,
 		Trash2,
 		Video,
 	} from "@lucide/svelte";
 	import { toast } from "svelte-sonner";
+	import {
+		isStarred,
+		markRecent,
+		recentEntries,
+		starredKeys,
+		toggleStar,
+	} from "$lib/activity";
 	import { callS3 } from "$lib/api";
 	import { isInsidePrefix } from "$lib/move-path";
 	import { runMove } from "$lib/move-run";
@@ -84,6 +93,18 @@
 	let bulkMoveMode = $state<"move" | "copy" | null>(null);
 	let dragKeys = $state<string[] | null>(null);
 	let dropTarget = $state<string | null>(null);
+	let starred = $state<Set<string>>(new Set());
+	let starredOnly = $state(false);
+	let showRecent = $state(false);
+	let recentList = $state<{ k: string; t: number }[]>([]);
+	let recentRef: HTMLDivElement | undefined = $state();
+	let stats = $state<{
+		files: number;
+		folders: number;
+		totalSize: number;
+		capped: boolean;
+	} | null>(null);
+	let statsLoading = $state(false);
 
 	$effect(() => {
 		void objects;
@@ -91,6 +112,87 @@
 		void searchQuery;
 		selectedKeys = new Set();
 	});
+
+	$effect(() => {
+		void connectionId;
+		void bucketName;
+		starred = new Set(starredKeys(connectionId, bucketName));
+	});
+
+	$effect(() => {
+		if (!showRecent) return;
+		recentList = recentEntries(connectionId, bucketName);
+	});
+
+	function handleToggleStar(key: string) {
+		const on = toggleStar(connectionId, bucketName, key);
+		const next = new Set(starred);
+		if (on) next.add(key);
+		else next.delete(key);
+		starred = next;
+		if (starredOnly) starred = new Set(starred); // retrigger filter
+	}
+
+	function nameOf(key: string) {
+		return key.split("/").filter(Boolean).pop() || key;
+	}
+
+	function parentOf(key: string) {
+		const i = key.lastIndexOf("/");
+		return i <= 0 ? "" : key.slice(0, i + 1);
+	}
+
+	async function openRecent(key: string) {
+		showRecent = false;
+		markRecent(connectionId, bucketName, key);
+		if (key.endsWith("/")) {
+			await fetchObjects(key);
+			return;
+		}
+		const parent = parentOf(key);
+		await fetchObjects(parent);
+		const found = objects.find((o) => o.key === key);
+		const name = nameOf(key);
+		const dot = name.lastIndexOf(".");
+		previewObject =
+			found ??
+			({
+				key,
+				name,
+				type: "file",
+				extension: dot > 0 ? name.slice(dot + 1) : undefined,
+			} as S3ObjectInfo);
+	}
+
+	async function computeStats() {
+		statsLoading = true;
+		try {
+			const r = await callS3<{
+				files?: number;
+				folders?: number;
+				totalSize?: number;
+				capped?: boolean;
+				error?: string;
+			}>("getPrefixStats", {
+				connectionId,
+				bucket: bucketName,
+				prefix,
+			});
+			if (r.error) throw new Error(r.error);
+			stats = {
+				files: r.files ?? 0,
+				folders: r.folders ?? 0,
+				totalSize: r.totalSize ?? 0,
+				capped: r.capped === true,
+			};
+		} catch (error: unknown) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to compute stats",
+			);
+		} finally {
+			statsLoading = false;
+		}
+	}
 
 	function toggleSelection(key: string) {
 		const newSet = new Set(selectedKeys);
@@ -188,6 +290,10 @@
 		const keys = Array.from(selectedKeys);
 		if (keys.length === 0) return;
 
+		for (const key of keys.filter((k) => !k.endsWith("/")).slice(0, 50)) {
+			markRecent(connectionId, bucketName, key);
+		}
+
 		const params = new URLSearchParams({
 			connectionId,
 			bucket: bucketName,
@@ -229,6 +335,7 @@
 
 			objects = fixedObjects;
 			nextToken = data.nextToken;
+			if (newPrefix !== prefix) stats = null;
 			prefix = newPrefix;
 
 			if (!token) {
@@ -319,15 +426,19 @@
 
 	function handlePreview(obj: S3ObjectInfo) {
 		if (obj.type === "file") {
+			markRecent(connectionId, bucketName, obj.key);
 			previewObject = obj;
 		}
 	}
 
-	const filteredObjects = $derived(
-		isSearching
+	const filteredObjects = $derived.by(() => {
+		const list = isSearching
 			? objects
-			: objects.filter((obj) => obj.name.toLowerCase().includes(searchQuery.toLowerCase()))
-	);
+			: objects.filter((obj) =>
+					obj.name.toLowerCase().includes(searchQuery.toLowerCase()),
+				);
+		return starredOnly ? list.filter((obj) => starred.has(obj.key)) : list;
+	});
 
 	const sortedObjects = $derived(
 		[...filteredObjects].sort((a, b) => {
@@ -419,6 +530,12 @@
 		});
 	}
 
+	function handleRecentOutside(event: MouseEvent) {
+		if (recentRef && !recentRef.contains(event.target as Node)) {
+			showRecent = false;
+		}
+	}
+
 	function onRowDragStart(e: DragEvent, key: string) {
 		dragKeys =
 			selectedKeys.size > 0 && selectedKeys.has(key)
@@ -507,6 +624,8 @@
 		}
 	}
 </script>
+
+<svelte:window onmousedown={handleRecentOutside} />
 
 {#snippet fileIcon(obj: S3ObjectInfo)}
 	{#if obj.type === "folder"}
@@ -610,6 +729,58 @@
 			>
 				<Search size={16} />
 			</Button>
+			<Button
+				variant={starredOnly ? "secondary" : "ghost"}
+				size="sm"
+				class="h-9 gap-1"
+				type="button"
+				onclick={() => (starredOnly = !starredOnly)}
+			>
+				<Star
+					size={14}
+					class={starredOnly ? "fill-amber-400 text-amber-400" : ""}
+				/>
+				<span class="hidden sm:inline">Starred</span>
+			</Button>
+			<div class="relative" bind:this={recentRef}>
+				<Button
+					variant="ghost"
+					size="icon"
+					class="h-9 w-9"
+					type="button"
+					title="Recent"
+					onclick={() => (showRecent = !showRecent)}
+				>
+					<Clock size={16} />
+				</Button>
+				{#if showRecent}
+					<div
+						class="absolute right-0 top-full mt-2 w-72 bg-card border border-border/40 rounded-xl shadow-xl z-1000 py-1 overflow-hidden"
+					>
+						<p class="px-4 py-2 text-xs font-medium text-muted-foreground">
+							Recent
+						</p>
+						{#if recentList.length === 0}
+							<p class="px-4 py-3 text-sm text-muted-foreground">
+								Nothing here yet
+							</p>
+						{:else}
+							{#each recentList as entry (entry.k)}
+								<button
+									type="button"
+									class="w-full flex flex-col gap-0.5 px-4 py-2 text-sm hover:bg-accent text-left"
+									onclick={() => openRecent(entry.k)}
+								>
+									<span class="truncate font-medium">{nameOf(entry.k)}</span>
+									<span class="truncate text-xs text-muted-foreground">
+										{parentOf(entry.k) || "bucket root"}
+									</span>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				{/if}
+			</div>
 			<div class="flex border rounded-lg overflow-hidden shrink-0">
 				<Button
 					variant={viewMode === "list" ? "secondary" : "ghost"}
@@ -818,6 +989,25 @@
 											obj.type === "folder" && onFolderDrop(e, obj.key)}
 									>
 										{@render fileIcon(obj)}
+										<button
+											type="button"
+											class={cn(
+												"shrink-0 transition-opacity",
+												starred.has(obj.key)
+													? "text-amber-400"
+													: "text-muted-foreground opacity-0 group-hover:opacity-100"
+											)}
+											onclick={(e) => {
+												e.stopPropagation();
+												handleToggleStar(obj.key);
+											}}
+											title={starred.has(obj.key) ? "Unstar" : "Star"}
+										>
+											<Star
+												size={14}
+												class={starred.has(obj.key) ? "fill-amber-400" : ""}
+											/>
+										</button>
 										{#if obj.type === "folder"}
 											<button
 												onclick={() => fetchObjects(obj.key)}
@@ -922,6 +1112,25 @@
 							<span class="text-xs font-medium truncate w-full">{obj.name}</span>
 
 							<div class="absolute top-1 right-1 opacity-100 group-hover:opacity-100 flex items-center gap-1">
+								<button
+									type="button"
+									class={cn(
+										"bg-background/80 backdrop-blur-sm rounded-md p-1 transition-opacity",
+										starred.has(obj.key)
+											? "text-amber-400"
+											: "text-muted-foreground opacity-0 group-hover:opacity-100"
+									)}
+									onclick={(e) => {
+										e.stopPropagation();
+										handleToggleStar(obj.key);
+									}}
+									title={starred.has(obj.key) ? "Unstar" : "Star"}
+								>
+									<Star
+										size={12}
+										class={starred.has(obj.key) ? "fill-amber-400" : ""}
+									/>
+								</button>
 								{#if obj.isPublic || connectionType === "r2"}
 									<Button
 										variant="secondary"
@@ -975,6 +1184,34 @@
 					{#if totalItems}
 						of <span class="font-medium text-foreground">{totalPages}</span>
 					{/if}
+				{/if}
+				{#if !isSearching}
+					<span class="ml-4 text-xs align-middle">
+						{#if stats}
+							<button
+								type="button"
+								class="hover:underline text-muted-foreground"
+								title="Recalculate"
+								onclick={computeStats}
+								disabled={statsLoading}
+							>
+								{stats.files} file{stats.files === 1 ? "" : "s"}{stats.capped
+									? "+"
+									: ""} · {stats.folders} folder{stats.folders === 1
+									? ""
+									: ""} · {formatSize(stats.totalSize)}{stats.capped ? "+" : ""}
+							</button>
+						{:else}
+							<button
+								type="button"
+								class="text-muted-foreground hover:underline disabled:opacity-50"
+								onclick={computeStats}
+								disabled={statsLoading}
+							>
+								{statsLoading ? "Calculating…" : "Show folder size"}
+							</button>
+						{/if}
+					</span>
 				{/if}
 			</div>
 			<div class="flex items-center gap-2">

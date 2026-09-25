@@ -26,3 +26,4 @@ contradicts an ADR must either update the ADR or be reconsidered.
 | [0003](0003-same-site-strict-and-write-only-provisioning.md) | SameSite=strict cookies; provision keys only on same-origin writes | Accepted |
 | [0004](0004-generic-client-errors.md) | Generic client-facing errors; AppError as the safe-message channel | Accepted |
 | [0005](0005-trash-prefix-soft-delete.md) | Trash as a hidden self-describing prefix (soft delete) | Accepted |
+| [0006](0006-activity-in-localstorage.md) | Activity (stars/recents) in localStorage, not cookies | Accepted |

@@ -194,8 +194,8 @@ assert_contains "bogus connection -> AppError message" "Connection not found" "$
 # folder delete must be routed (it used to fall through to the 404 default)
 BFD="$(post_json "$JAR" "$JAR" /api/s3/deleteFolder '{"connectionId":"nope","bucket":"b","folderPrefix":"x/"}')"
 assert_contains "deleteFolder op routed (not 404)" "Connection not found" "$BFD"
-# move/copy + details + ACL-toggle ops are routed
-for OP in moveObjects makePrivate getObjectDetails; do
+# move/copy + details + stats + ACL-toggle ops are routed
+for OP in moveObjects makePrivate getObjectDetails getPrefixStats; do
 	OPR="$(post_json "$JAR" "$JAR" "/api/s3/$OP" '{"connectionId":"nope","bucket":"b","key":"k","destPrefix":"","mode":"move"}')"
 	assert_contains "$OP op routed" "Connection not found" "$OPR"
 done

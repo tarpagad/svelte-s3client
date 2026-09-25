@@ -8,6 +8,7 @@
 		X,
 	} from "@lucide/svelte";
 	import { toast } from "svelte-sonner";
+	import { markRecent } from "$lib/activity";
 	import { uploadToS3 } from "$lib/api";
 	import Button from "$lib/components/ui/button.svelte";
 
@@ -100,6 +101,7 @@
 				if (result.success) {
 					uploadedFiles[i] = { ...fileStatus, status: "success" };
 					successCount++;
+					markRecent(connectionId, bucketName, prefix + fileStatus.file.name);
 				} else {
 					uploadedFiles[i] = {
 						...fileStatus,

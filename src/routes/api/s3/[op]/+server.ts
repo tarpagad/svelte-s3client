@@ -155,6 +155,15 @@ case "moveObjects":
 						num(body, "maxAgeDays", 30),
 					),
 				);
+			case "getPrefixStats":
+				return json(
+					await s3.getPrefixStats(
+						ctx,
+						str(body, "connectionId"),
+						str(body, "bucket"),
+						str(body, "prefix"),
+					),
+				);
 			case "getObjectDetails":
 				return json(
 					await s3.getObjectDetails(

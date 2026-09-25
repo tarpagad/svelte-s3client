@@ -846,6 +846,54 @@ export async function purgeTrash(
 	}
 }
 
+/** On-demand size/count for one prefix level (Drive-style usage chip). */
+export async function getPrefixStats(
+	ctx: ServerContext,
+	connectionId: string,
+	bucket: string,
+	prefix: string,
+) {
+	try {
+		const client = await getS3Client(ctx, connectionId);
+		const STATS_PAGE_LIMIT = 100; //100k items max, then report capped
+		let files = 0;
+		let folders = 0;
+		let totalSize = 0;
+		let pages = 0;
+		let capped = false;
+		let continuationToken: string | undefined;
+		do {
+			const response = await client.send(
+				new ListObjectsV2Command({
+					Bucket: bucket,
+					Prefix: prefix,
+					Delimiter: "/",
+					ContinuationToken: continuationToken,
+					MaxKeys: 1000,
+				}),
+			);
+			for (const cp of response.CommonPrefixes || []) {
+				if (cp.Prefix && cp.Prefix !== prefix) folders += 1;
+			}
+			for (const c of response.Contents || []) {
+				if (c.Key === prefix || c.Key?.endsWith("/")) continue;
+				files += 1;
+				totalSize += c.Size ?? 0;
+			}
+			pages += 1;
+			if (pages >= STATS_PAGE_LIMIT) {
+				capped = true;
+				break;
+			}
+			continuationToken = response.NextContinuationToken;
+		} while (continuationToken);
+		return { files, folders, totalSize, capped };
+	} catch (error: unknown) {
+		console.error("Failed to compute prefix stats:", error);
+		return { error: clientMessage(error, "Failed to compute stats") };
+	}
+}
+
 export async function getDownloadUrl(
 	ctx: ServerContext,
 	connectionId: string,
