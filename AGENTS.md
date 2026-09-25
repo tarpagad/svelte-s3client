@@ -7,8 +7,8 @@ credentials are AES-256-GCM encrypted and stored in HTTP-only cookies.
 
 | File | Purpose |
 |------|---------|
-| `todo.md` | Working backlog (Now / Next / Later / Done, with commit hashes) |
-| `issue.md` | Open bugs & risks (ISSUE-NNN), with resolved history |
+| `todo.md` | Working backlog (Now / Next / Later; finished items are deleted — history lives in git) |
+| `issue.md` | Open bugs & risks (ISSUE-NNN; resolved issues are deleted — history lives in git) |
 | `docs/adr/` | Architecture Decision Records — read before changing architecture; write one before reversing a decision (index in `docs/adr/README.md`) |
 
 Keep `todo.md`/`issue.md` updated in the same commit as the work they describe.

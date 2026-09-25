@@ -137,5 +137,5 @@ src/
 
 - [`docs/adr/`](docs/adr/) — architecture decision records (index in
   `docs/adr/README.md`); read before changing architecture
-- [`issue.md`](issue.md) — open bugs and risks (ISSUE-NNN) with resolved history
-- [`todo.md`](todo.md) — working backlog (Now / Next / Later / Done)
+- [`issue.md`](issue.md) — open bugs and risks (ISSUE-NNN)
+- [`todo.md`](todo.md) — working backlog (Now / Next / Later)

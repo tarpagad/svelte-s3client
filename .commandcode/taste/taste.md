@@ -1,0 +1,1 @@
+- When reporting a bug (including live/production issues), pastes the raw, verbatim error output or stack trace rather than paraphrasing — expects diagnosis to be driven by the actual error text. Confidence: 0.6
