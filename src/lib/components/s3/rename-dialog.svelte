@@ -70,6 +70,12 @@
 	}
 </script>
 
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === "Escape" && !isRenaming) onClose();
+	}}
+/>
+
 <div
 	class="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
 	transition:fade={{ duration: 150 }}

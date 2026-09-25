@@ -174,6 +174,7 @@
 					/>
 				</div>
 			{:else if previewType === "video" && downloadUrl}
+				<!-- svelte-ignore a11y_media_has_caption -->
 				<video
 					controls
 					playsinline

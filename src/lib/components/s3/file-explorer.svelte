@@ -37,6 +37,7 @@
 	import { runMove } from "$lib/move-run";
 	import { runRestore, runTrash } from "$lib/trash-run";
 	import Button from "$lib/components/ui/button.svelte";
+	import ContextMenu from "$lib/components/ui/context-menu.svelte";
 	import Card from "$lib/components/ui/card.svelte";
 	import CardContent from "$lib/components/ui/card-content.svelte";
 	import Input from "$lib/components/ui/input.svelte";
@@ -44,12 +45,15 @@
 	import type { BucketConnectionType, S3ObjectInfo } from "$lib/types";
 	import { cn, getPublicObjectUrl } from "$lib/utils";
 	import Breadcrumbs from "./breadcrumbs.svelte";
+	import DetailsDrawer from "./details-drawer.svelte";
 	import BulkDeleteDialog from "./bulk-delete-dialog.svelte";
 	import ConfirmUploadDialog from "./confirm-upload-dialog.svelte";
 	import CreateFolderDialog from "./create-folder-dialog.svelte";
 	import MoveDialog from "./move-dialog.svelte";
 	import ObjectActions from "./object-actions.svelte";
 	import PreviewModal from "./preview-modal.svelte";
+	import RenameDialog from "./rename-dialog.svelte";
+	import ThumbImage from "./thumb-image.svelte";
 	import UploadZone from "./upload-zone.svelte";
 
 	let {
@@ -81,7 +85,9 @@
 	let nextToken = $state<string | undefined>(initialNextToken);
 	let prevTokens = $state<string[]>([]);
 	let currentPage = $state(1);
-	let sortBy = $state<"date-desc" | "date-asc" | "name-asc" | "name-desc">("date-desc");
+	let sortBy = $state<
+		"date-desc" | "date-asc" | "name-asc" | "name-desc" | "size-asc" | "size-desc"
+	>("date-desc");
 	let totalItems = $state<number | null>(null);
 	let tokenCache = $state<(string | undefined)[]>([undefined]);
 	let isSearching = $state(false);
@@ -105,12 +111,18 @@
 		capped: boolean;
 	} | null>(null);
 	let statsLoading = $state(false);
+	let anchorKey = $state<string | null>(null);
+	let renameTarget = $state<S3ObjectInfo | null>(null);
+	let moveItem = $state<{ obj: S3ObjectInfo; mode: "move" | "copy" } | null>(null);
+	let detailsObject = $state<S3ObjectInfo | null>(null);
+	let ctx = $state<{ x: number; y: number; obj: S3ObjectInfo | null } | null>(null);
 
 	$effect(() => {
 		void objects;
 		void prefix;
 		void searchQuery;
 		selectedKeys = new Set();
+		anchorKey = null;
 	});
 
 	$effect(() => {
@@ -258,6 +270,101 @@
 			},
 			error: "Failed to update permissions",
 		});
+	}
+
+	function handleRowSelect(
+		key: string,
+		e: { shiftKey: boolean; ctrlKey?: boolean; metaKey?: boolean },
+		source: "row" | "checkbox",
+	) {
+		if (e.shiftKey && anchorKey) {
+			const order = sortedObjects.map((o) => o.key);
+			const a = order.indexOf(anchorKey);
+			const b = order.indexOf(key);
+			if (a !== -1 && b !== -1) {
+				const [lo, hi] = a < b ? [a, b] : [b, a];
+				selectedKeys = new Set(order.slice(lo, hi + 1));
+				return;
+			}
+		}
+		if (source === "row" && !(e.ctrlKey || e.metaKey)) return;
+		anchorKey = key;
+		toggleSelection(key);
+	}
+
+	function ctxItems(): {
+		label: string;
+		divider?: boolean;
+		danger?: boolean;
+		onSelect: () => void;
+	}[] {
+		if (!ctx) return [];
+		if (!ctx.obj) {
+			return [
+				{ label: "New folder", onSelect: () => (showCreateFolder = true) },
+				{ label: "Upload", onSelect: () => (showUpload = true) },
+				{ label: "Refresh", onSelect: () => fetchObjects(prefix) },
+			];
+		}
+		const sel = [...selectedKeys];
+		const single =
+			sel.length === 1 ? objects.find((o) => o.key === sel[0]) : undefined;
+		const menu: ReturnType<typeof ctxItems> = [];
+		if (single?.type === "file") {
+			menu.push({ label: "Preview", onSelect: () => handlePreview(single) });
+		}
+		menu.push({
+			label:
+				single?.type === "folder" || sel.some((k) => k.endsWith("/"))
+					? "Download as ZIP"
+					: "Download",
+			onSelect: handleBulkDownload,
+		});
+		if (single) {
+			menu.push({ label: "Rename…", onSelect: () => (renameTarget = single) });
+			menu.push({
+				label: "Move…",
+				onSelect: () => (moveItem = { obj: single, mode: "move" }),
+			});
+			menu.push({
+				label: "Copy…",
+				onSelect: () => (moveItem = { obj: single, mode: "copy" }),
+			});
+			if (single.type === "file") {
+				menu.push({
+					label: "Details",
+					onSelect: () => (detailsObject = single),
+				});
+			}
+		} else if (sel.length > 1) {
+			menu.push({
+				label: `Move ${sel.length} items…`,
+				onSelect: () => (bulkMoveMode = "move"),
+			});
+			menu.push({
+				label: `Copy ${sel.length} items…`,
+				onSelect: () => (bulkMoveMode = "copy"),
+			});
+		}
+		menu.push({
+			label: sel.length > 1 ? "Copy keys" : "Copy key",
+			onSelect: () => {
+				navigator.clipboard.writeText(sel.join("\n"));
+				toast.success(
+					`${sel.length} key${sel.length === 1 ? "" : "s"} copied to clipboard`,
+				);
+			},
+		});
+		menu.push({ label: "", divider: true, onSelect: () => {} });
+		menu.push({
+			label: "Delete",
+			danger: true,
+			onSelect: () => {
+				if (sel.length === 1 && !sel[0].endsWith("/")) handleDelete(sel[0]);
+				else showBulkDelete = true;
+			},
+		});
+		return menu;
 	}
 
 	function handleBulkDelete() {
@@ -456,6 +563,12 @@
 			if (sortBy === "name-desc") {
 				return b.name.localeCompare(a.name);
 			}
+			if (sortBy === "size-desc") {
+				return (b.size ?? 0) - (a.size ?? 0);
+			}
+			if (sortBy === "size-asc") {
+				return (a.size ?? 0) - (b.size ?? 0);
+			}
 			return 0;
 		})
 	);
@@ -528,6 +641,75 @@
 			}
 			return obj;
 		});
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		const t = e.target as HTMLElement | null;
+		if (
+			t &&
+			(t.tagName === "INPUT" ||
+				t.tagName === "TEXTAREA" ||
+				t.tagName === "SELECT" ||
+				t.isContentEditable)
+		)
+			return;
+		if (
+			previewObject ||
+			renameTarget ||
+			moveItem ||
+			detailsObject ||
+			showBulkDelete ||
+			showCreateFolder ||
+			bulkMoveMode ||
+			showConfirmUpload
+		)
+			return;
+		if (ctx) {
+			if (e.key === "Escape") ctx = null;
+			return;
+		}
+
+		const sel = [...selectedKeys];
+		const mod = e.ctrlKey || e.metaKey;
+		if (mod && e.key.toLowerCase() === "a") {
+			e.preventDefault();
+			toggleSelectAll();
+			return;
+		}
+		if (mod && e.key.toLowerCase() === "c" && sel.length > 0) {
+			e.preventDefault();
+			navigator.clipboard.writeText(sel.join("\n"));
+			toast.success(
+				`${sel.length} key${sel.length === 1 ? "" : "s"} copied to clipboard`,
+			);
+			return;
+		}
+		if (e.key === "Escape") {
+			if (showRecent) showRecent = false;
+			else if (selectedKeys.size > 0) selectedKeys = new Set();
+			return;
+		}
+		if (sel.length === 0) return;
+		if (e.key === "Delete") {
+			e.preventDefault();
+			if (sel.length === 1) handleDelete(sel[0]);
+			else showBulkDelete = true;
+			return;
+		}
+		if (e.key === "F2" && sel.length === 1) {
+			e.preventDefault();
+			const o = objects.find((x) => x.key === sel[0]);
+			if (o) renameTarget = o;
+			return;
+		}
+		if (e.key === "Enter" && sel.length === 1) {
+			e.preventDefault();
+			const o = objects.find((x) => x.key === sel[0]);
+			if (o) {
+				if (o.type === "folder") fetchObjects(o.key);
+				else handlePreview(o);
+			}
+		}
 	}
 
 	function handleRecentOutside(event: MouseEvent) {
@@ -625,7 +807,7 @@
 	}
 </script>
 
-<svelte:window onmousedown={handleRecentOutside} />
+<svelte:window onmousedown={handleRecentOutside} onkeydown={handleKeydown} />
 
 {#snippet fileIcon(obj: S3ObjectInfo)}
 	{#if obj.type === "folder"}
@@ -670,6 +852,12 @@
 	ondragover={onGlobalDragOver}
 	ondragleave={onGlobalDragLeave}
 	ondrop={onGlobalDrop}
+	oncontextmenu={(e) => {
+		const t = e.target as HTMLElement;
+		if (t.closest("input, textarea, select")) return;
+		e.preventDefault();
+		ctx = { x: e.clientX, y: e.clientY, obj: null };
+	}}
 >
 	{#if isDragActive}
 		<div
@@ -960,10 +1148,21 @@
 									"hover:bg-muted/30 transition-colors group",
 									selectedKeys.has(obj.key) && "bg-primary/5 hover:bg-primary/10"
 								)}
-								onclick={(e) => {
-									if (e.ctrlKey || e.metaKey) {
-										toggleSelection(obj.key);
+								onclick={(e) => handleRowSelect(obj.key, e, "row")}
+								ondblclick={(e) => {
+									e.stopPropagation();
+									if (obj.type === "file") handlePreview(obj);
+									else fetchObjects(obj.key);
+								}}
+								oncontextmenu={(e) => {
+									const t = e.target as HTMLElement;
+									if (t.closest("input, textarea, select")) return;
+									if (!selectedKeys.has(obj.key)) {
+										selectedKeys = new Set([obj.key]);
+										anchorKey = obj.key;
 									}
+									e.preventDefault();
+									ctx = { x: e.clientX, y: e.clientY, obj };
 								}}
 							>
 								<td class="px-4 py-3">
@@ -971,9 +1170,11 @@
 										type="checkbox"
 										class="rounded border-input"
 										checked={selectedKeys.has(obj.key)}
-										onchange={() => toggleSelection(obj.key)}
-										onclick={(e) => e.stopPropagation()}
-									/>
+										onclick={(e) => {
+											e.stopPropagation();
+											handleRowSelect(obj.key, e, "checkbox");
+										}}
+										/>
 								</td>
 								<td class="px-4 py-3">
 									<div
@@ -1088,11 +1289,24 @@
 							dropTarget === obj.key && "ring-2 ring-primary"
 						)}
 						onclick={(e) => {
-							if (e.ctrlKey || e.metaKey) {
-								toggleSelection(obj.key);
+							if (e.ctrlKey || e.metaKey || e.shiftKey) {
+								handleRowSelect(obj.key, e, "row");
 							} else if (obj.type === "folder") {
 								fetchObjects(obj.key);
 							}
+						}}
+						ondblclick={(e) => {
+							if (obj.type === "file") handlePreview(obj);
+						}}
+						oncontextmenu={(e) => {
+							const t = e.target as HTMLElement;
+							if (t.closest("input, textarea, select, button")) return;
+							if (!selectedKeys.has(obj.key)) {
+								selectedKeys = new Set([obj.key]);
+								anchorKey = obj.key;
+							}
+							e.preventDefault();
+							ctx = { x: e.clientX, y: e.clientY, obj };
 						}}
 					>
 						<CardContent class="p-4 flex flex-col items-center justify-center text-center space-y-2">
@@ -1104,11 +1318,17 @@
 									type="checkbox"
 									class="rounded border-input h-4 w-4 shadow-sm"
 									checked={selectedKeys.has(obj.key)}
-									onchange={() => toggleSelection(obj.key)}
-									onclick={(e) => e.stopPropagation()}
-								/>
+									onclick={(e) => {
+										e.stopPropagation();
+										handleRowSelect(obj.key, e, "checkbox");
+									}}
+									/>
 							</div>
-							{@render fileIconLarge(obj)}
+							{#if obj.type === "file" && ["jpg", "jpeg", "png", "gif", "svg", "webp"].includes(obj.extension?.toLowerCase() || "")}
+								<ThumbImage {connectionId} {bucketName} objectKey={obj.key} />
+							{:else}
+								{@render fileIconLarge(obj)}
+							{/if}
 							<span class="text-xs font-medium truncate w-full">{obj.name}</span>
 
 							<div class="absolute top-1 right-1 opacity-100 group-hover:opacity-100 flex items-center gap-1">
@@ -1223,7 +1443,9 @@
 								| "date-desc"
 								| "date-asc"
 								| "name-asc"
-								| "name-desc";
+								| "name-desc"
+								| "size-asc"
+								| "size-desc";
 							sortBy = newSort;
 							fetchObjects(prefix, undefined, newSort);
 						}}
@@ -1233,6 +1455,8 @@
 						<option value="date-asc">Oldest First</option>
 						<option value="name-asc">Name (A-Z)</option>
 						<option value="name-desc">Name (Z-A)</option>
+						<option value="size-desc">Size (largest)</option>
+						<option value="size-asc">Size (smallest)</option>
 					</select>
 
 					<div class="flex items-center gap-1 mr-4">
@@ -1314,6 +1538,53 @@
 				selectedKeys = new Set();
 				fetchObjects(prefix);
 			}}
+		/>
+	{/if}
+
+	{#if ctx}
+		<ContextMenu
+			x={ctx.x}
+			y={ctx.y}
+			items={ctxItems()}
+			onClose={() => (ctx = null)}
+		/>
+	{/if}
+
+	{#if moveItem}
+		<MoveDialog
+			{connectionId}
+			{bucketName}
+			mode={moveItem.mode}
+			fileKeys={moveItem.obj.type === "file" ? [moveItem.obj.key] : []}
+			folderPrefixes={moveItem.obj.type === "folder" ? [moveItem.obj.key] : []}
+			srcName={moveItem.obj.name}
+			currentPrefix={prefix}
+			publicKeys={moveItem.obj.isPublic ? [moveItem.obj.key] : []}
+			onClose={() => (moveItem = null)}
+			onSuccess={() => fetchObjects(prefix)}
+		/>
+	{/if}
+
+	{#if detailsObject}
+		<DetailsDrawer
+			{connectionId}
+			{bucketName}
+			{connectionType}
+			{publicUrl}
+			object={detailsObject}
+			onRefresh={() => fetchObjects(prefix)}
+			onClose={() => (detailsObject = null)}
+		/>
+	{/if}
+
+	{#if renameTarget}
+		<RenameDialog
+			{connectionId}
+			{bucketName}
+			oldKey={renameTarget.key}
+			onClose={() => (renameTarget = null)}
+			onSuccess={() => fetchObjects(prefix)}
+			onOptimisticRename={handleOptimisticRename}
 		/>
 	{/if}
 
