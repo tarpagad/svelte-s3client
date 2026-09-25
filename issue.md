@@ -19,17 +19,6 @@ Rules:
 
 ## Open
 
-### ISSUE-001 — ZIP listing still expands up to 800 folders without a prefix budget
-- Severity: low
-- Status: open
-- Area: `src/routes/api/download-zip/+server.ts`
-
-`MAX_FILES_PER_ZIP` (800) caps entries, but `expandKeys` keeps listing until it
-has 800 items or exhausts pagination — a pathological bucket could still burn
-many listing subrequests before the cap trips. The bulk-delete paths are
-bounded (`MAX_BULK_DELETE_OBJECTS`); this one is only bounded by the 800-file
-result cap. Candidate fix: stop expanding once `items.length >= 800`.
-
 ### ISSUE-002 — `user_prefs` cookie is not integrity-protected
 - Severity: low
 - Status: open

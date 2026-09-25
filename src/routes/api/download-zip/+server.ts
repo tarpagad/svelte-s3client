@@ -29,11 +29,16 @@ async function expandKeys(
 	client: S3Client,
 	bucket: string,
 	keys: string[],
+	state: { truncated: boolean },
 ): Promise<DownloadItem[]> {
 	const items: DownloadItem[] = [];
 	const seen = new Set<string>();
 
 	for (const key of keys) {
+		if (items.length >= MAX_FILES_PER_ZIP) {
+			state.truncated = true;
+			break;
+		}
 		if (seen.has(key)) continue;
 		seen.add(key);
 
@@ -64,6 +69,10 @@ async function expandKeys(
 
 			// Folder markers ("prefix/") have no body — skip them.
 			for (const c of response.Contents || []) {
+				if (items.length >= MAX_FILES_PER_ZIP) {
+					state.truncated = true;
+					break;
+				}
 				if (!c.Key || c.Key.endsWith("/")) continue;
 				items.push({
 					key: c.Key,
@@ -75,14 +84,23 @@ async function expandKeys(
 				if (p.Prefix) nestedPrefixes.push(p.Prefix);
 			}
 
+			if (state.truncated) break;
 			continuationToken = response.NextContinuationToken;
 		} while (continuationToken);
 
 		// Expand nested folders once, after pagination completes, nesting
 		// their contents under this folder's root in the zip.
 		for (const nestedPrefix of nestedPrefixes) {
-			const nested = await expandKeys(client, bucket, [nestedPrefix]);
+			if (items.length >= MAX_FILES_PER_ZIP) {
+				state.truncated = true;
+				break;
+			}
+			const nested = await expandKeys(client, bucket, [nestedPrefix], state);
 			for (const n of nested) {
+				if (items.length >= MAX_FILES_PER_ZIP) {
+					state.truncated = true;
+					break;
+				}
 				items.push({ key: n.key, zipPath: sanitizeZipPath(root + n.zipPath) });
 			}
 		}
@@ -130,9 +148,10 @@ export const GET: RequestHandler = async (event) => {
 		}
 	}
 
+	const expandState = { truncated: false };
 	let items: DownloadItem[];
 	try {
-		items = await expandKeys(client, bucketParam, keys);
+		items = await expandKeys(client, bucketParam, keys, expandState);
 	} catch (error: unknown) {
 		console.error("Failed to expand keys for zip download:", error);
 		return new Response(
@@ -145,9 +164,9 @@ export const GET: RequestHandler = async (event) => {
 		return new Response("No files found in the selection", { status: 404 });
 	}
 
-	if (items.length > MAX_FILES_PER_ZIP) {
+	if (expandState.truncated || items.length > MAX_FILES_PER_ZIP) {
 		return new Response(
-			`Too many files to download as a zip (${items.length}). Limit is ${MAX_FILES_PER_ZIP}.`,
+			`Too many files to download as a zip. Limit is ${MAX_FILES_PER_ZIP}.`,
 			{ status: 413 },
 		);
 	}

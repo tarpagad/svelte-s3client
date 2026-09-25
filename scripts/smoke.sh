@@ -187,6 +187,9 @@ assert_contains "malformed JSON message" "Invalid JSON body" "$(cat "$BODY")"
 # Valid JSON, bogus connection -> AppError surfaced verbatim (200 envelope)
 BOGUS="$(post_json "$JAR" "$JAR" /api/s3/listBuckets '{"connectionId":"nope"}')"
 assert_contains "bogus connection -> AppError message" "Connection not found" "$BOGUS"
+# folder delete must be routed (it used to fall through to the 404 default)
+BFD="$(post_json "$JAR" "$JAR" /api/s3/deleteFolder '{"connectionId":"nope","bucket":"b","folderPrefix":"x/"}')"
+assert_contains "deleteFolder op routed (not 404)" "Connection not found" "$BFD"
 
 # --- 7. key rotation over existing data ---------------------------------------
 

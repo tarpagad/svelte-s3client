@@ -83,6 +83,15 @@ export const POST: RequestHandler = async (event) => {
 						str(body, "key"),
 					),
 				);
+			case "deleteFolder":
+				return json(
+					await s3.deleteFolder(
+						ctx,
+						str(body, "connectionId"),
+						str(body, "bucket"),
+						str(body, "folderPrefix"),
+					),
+				);
 			case "renameObject":
 				return json(
 					await s3.renameObject(
